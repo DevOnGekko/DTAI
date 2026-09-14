@@ -26,6 +26,12 @@ The DEK is never stored by either authority and is not written by the module.
 - `DTAI/dtai.ps1` — CLI wrapper for tools that need a raw 32-byte DEK file.
 - `DTAI/config.example.json` — two-authority configuration example.
 - `test/Dtai.Tests.ps1` — dependency-free focused tests.
+- `src/Dtai` — C# library with the same validation, release, and derivation logic.
+- `src/Dtai.Cli` — C# CLI wrapper equivalent to `dtai.ps1`.
+- `test/Dtai.Tests` — dependency-free focused tests for the C# library.
+
+The PowerShell module and the C# library implement the same protocol and
+derive the same DEK from the same configuration, context, and contributions.
 
 ## Authority requirements
 
@@ -127,6 +133,39 @@ It must write only the signed evidence token/document to standard output:
   -OutputPath /dev/shm/model.dek
 ```
 
+The C# library is the equivalent entry point for .NET workloads. The
+attestation callback receives the same challenge and must return the signed
+evidence:
+
+```csharp
+using Dtai;
+
+var configuration = DtaiConfiguration.Load("./dtai.json");
+var dek = await DtaiKeyRelease.ReleaseAsync(
+    configuration,
+    "model://publisher/name/v1",
+    async (authority, challenge, cancellationToken) =>
+        await attestationClient.GetEvidenceAsync(authority, challenge, cancellationToken));
+try
+{
+    // Decrypt and load model weights inside the TEE.
+}
+finally
+{
+    CryptographicOperations.ZeroMemory(dek);
+}
+```
+
+The C# CLI takes the same inputs as `dtai.ps1`:
+
+```shell
+dotnet run --project src/Dtai.Cli -- \
+  --configuration ./dtai.json \
+  --attestation-command /opt/dtai/get-attestation \
+  --context 'model://publisher/name/v1' \
+  --output /dev/shm/model.dek
+```
+
 Run the CLI only inside the attested TEE. Put the output on a TEE-protected
 memory filesystem, consume it immediately, and delete it after loading the
 model. The CLI refuses to overwrite a file and creates it with mode `0600` on
@@ -138,4 +177,11 @@ PowerShell 7.4 or newer is required.
 
 ```powershell
 pwsh -NoLogo -NoProfile -File ./test/Dtai.Tests.ps1
+```
+
+The C# tooling requires the .NET 8.0 SDK or newer.
+
+```shell
+dotnet build
+dotnet run --project test/Dtai.Tests
 ```
