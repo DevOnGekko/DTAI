@@ -19,6 +19,7 @@ public static class Program
         await AssertAwsAuthorityAsync().ConfigureAwait(false);
         AssertAwsConfigurationRules();
         AssertGoogleConfigurationRules();
+        await AssertGoogleAuthorityAsync().ConfigureAwait(false);
         AssertAwsSigV4Vectors();
         AssertAwsSigV4SignsRequestMessages();
         AssertAwsCredentialsAreRequired();
@@ -31,7 +32,8 @@ public static class Program
     {
         ["authority-azure"] = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray(),
         ["authority-secondary"] = Enumerable.Range(33, 32).Select(value => (byte)value).ToArray(),
-        ["authority-aws"] = Enumerable.Range(65, 32).Select(value => (byte)value).ToArray()
+        ["authority-aws"] = Enumerable.Range(65, 32).Select(value => (byte)value).ToArray(),
+        ["authority-google"] = Enumerable.Range(97, 32).Select(value => (byte)value).ToArray()
     };
 
     private const string AwsKeyArn =
@@ -81,13 +83,33 @@ public static class Program
             new DtaiAuthority
             {
                 Name = "authority-secondary",
-                Provider = "google-cloud-kms",
-                Endpoint = "https://google-authority.example/release",
-                GoogleAudience = "https://google-authority.example",
-                KeyId = "projects/example/locations/us-central1/keyRings/dtai/cryptoKeys/k2/cryptoKeyVersions/1"
+                Provider = "secondary-cloud-kms",
+                Endpoint = "https://secondary-authority.example/release",
+                KeyId = "projects/example/keys/k2"
             }
         }
     };
+
+    private static DtaiConfiguration NewGoogleTestConfiguration(
+        string keyId =
+            "projects/example/locations/us-central1/keyRings/dtai/cryptoKeys/contribution/cryptoKeyVersions/1",
+        string audience = "https://google-authority.example")
+    {
+        var configuration = NewTestConfiguration();
+        configuration.Authorities = new[]
+        {
+            configuration.Authorities[0],
+            new DtaiAuthority
+            {
+                Name = "authority-google",
+                Provider = DtaiGoogleAuthority.Provider,
+                Endpoint = "https://google-authority.example/v1/release",
+                GoogleAudience = audience,
+                KeyId = keyId
+            }
+        };
+        return configuration;
+    }
 
     private static Task<string> AttestationProviderAsync(
         DtaiAuthority authority,
@@ -284,17 +306,43 @@ public static class Program
 
     private static void AssertGoogleConfigurationRules()
     {
-        var invalidKeyId = NewTestConfiguration();
-        invalidKeyId.Authorities[1].KeyId = "projects/example/keys/k2";
-        AssertThrows(
-            () => invalidKeyId.Validate(),
-            "KeyId must identify a crypto key version");
+        NewGoogleTestConfiguration().Validate();
 
-        var missingAudience = NewTestConfiguration();
-        missingAudience.Authorities[1].GoogleAudience = null;
         AssertThrows(
-            () => missingAudience.Validate(),
+            () => NewGoogleTestConfiguration(keyId: "projects/example/keys/k2").Validate(),
+            "crypto key version");
+
+        AssertThrows(
+            () => NewGoogleTestConfiguration(audience: "http://google-authority.example").Validate(),
             "HTTPS GoogleAudience");
+    }
+
+    private static async Task AssertGoogleAuthorityAsync()
+    {
+        var authority = NewGoogleTestConfiguration().Authorities[1];
+        var handler = new TestHttpMessageHandler(_ => new HttpResponseMessage
+        {
+            Content = new StringContent(" identity-token \n")
+        });
+        using var httpClient = new HttpClient(handler);
+        var token = await DtaiGoogleAuthority
+            .GetIdentityTokenAsync(authority, httpClient, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        AssertEqual("identity-token", token, "Google identity token was incorrect.");
+        AssertEqual(
+            "Google",
+            handler.Request!.Headers.GetValues("Metadata-Flavor").Single(),
+            "Google metadata request header was missing.");
+        AssertEqual(
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=https%3A%2F%2Fgoogle-authority.example&format=full",
+            handler.Request.RequestUri!.AbsoluteUri,
+            "Google metadata request URI was incorrect.");
+
+        using var request = new HttpRequestMessage();
+        DtaiGoogleAuthority.AddBearerToken(request, token);
+        AssertEqual("Bearer", request.Headers.Authorization!.Scheme, "Google release request scheme was incorrect.");
+        AssertEqual(token, request.Headers.Authorization.Parameter!, "Google release request token was missing.");
     }
 
     private static void AssertAwsSigV4Vectors()
@@ -439,6 +487,24 @@ public static class Program
         {
             throw new InvalidOperationException(
                 $"Expected error '{expected}', got '{exception.Message}'.");
+        }
+    }
+
+    private sealed class TestHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> responseFactory;
+
+        public TestHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) =>
+            this.responseFactory = responseFactory;
+
+        public HttpRequestMessage? Request { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Request = request;
+            return Task.FromResult(responseFactory(request));
         }
     }
 }

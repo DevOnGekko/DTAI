@@ -119,13 +119,24 @@ Create a DTAI configuration JSON file, then:
 3. set the Azure provider to `azure-key-vault`, SKU to `Premium`, and use a
    versioned Key Vault key ID;
 4. set the second authority to a different provider, such as `aws-kms` with a
-   `Region`, a matching KMS key ARN, and an optional `SigningService`; and
+   `Region`, a matching KMS key ARN, and an optional `SigningService`, or
+   `google-cloud-kms` with a versioned Cloud KMS crypto key ID and a
+   `GoogleAudience` accepted by its release service; and
 5. keep `MaxReleaseAgeSeconds` as short as operationally practical (30–900).
 
 The salt is not secret, but it must remain stable for a given encrypted model.
 Use a stable, unambiguous context such as `model://publisher/name/version`.
 Changing the salt, context, key IDs, authority order, or either contribution
 produces a different DEK.
+
+For a Google Cloud secondary authority, deploy the normalized release service
+on a Google workload that can access only its Cloud KMS contribution. The
+default client obtains an identity token from the Google metadata service for
+`GoogleAudience` and presents it as a bearer token to that service. The service
+must validate the token and attestation evidence before using Cloud KMS, then
+return the normalized response with the contribution encrypted directly to the
+recipient JWK. Do not return a plaintext Cloud KMS decrypt result to the
+workload.
 
 ## Use
 

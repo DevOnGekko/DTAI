@@ -15,12 +15,6 @@ public sealed class DtaiAuthority
 
     public string? KeyId { get; set; }
 
-    /// <summary>
-    /// Google Cloud audience for the identity token, required when
-    /// <see cref="Provider"/> is <c>google-cloud-kms</c>.
-    /// </summary>
-    public string? GoogleAudience { get; set; }
-
     /// <summary>AWS region, required when <see cref="Provider"/> is <c>aws-kms</c>.</summary>
     public string? Region { get; set; }
 
@@ -29,6 +23,12 @@ public sealed class DtaiAuthority
     /// <c>execute-api</c>.
     /// </summary>
     public string? SigningService { get; set; }
+
+    /// <summary>
+    /// Google workload identity token audience, required when <see cref="Provider"/> is
+    /// <c>google-cloud-kms</c>.
+    /// </summary>
+    public string? GoogleAudience { get; set; }
 }
 
 /// <summary>Security constraints applied to every release.</summary>

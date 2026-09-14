@@ -25,6 +25,11 @@ public static class DtaiKeyRelease
         Timeout = TimeSpan.FromSeconds(30)
     };
 
+    private static readonly HttpClient GoogleMetadataHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(10)
+    };
+
     /// <summary>
     /// Requests both contributions, validates their release envelopes, unwraps them with the
     /// ephemeral recipient key, and derives the 256-bit model DEK.
@@ -231,23 +236,10 @@ public static class DtaiKeyRelease
         }
         else if (authority.Provider == DtaiGoogleAuthority.Provider)
         {
-            using var identityRequest = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={Uri.EscapeDataString(authority.GoogleAudience!)}&format=full");
-            identityRequest.Headers.Add("Metadata-Flavor", "Google");
-            using var identityResponse = await SharedHttpClient
-                .SendAsync(identityRequest, cancellationToken)
+            var identityToken = await DtaiGoogleAuthority
+                .GetIdentityTokenAsync(authority, GoogleMetadataHttpClient, cancellationToken)
                 .ConfigureAwait(false);
-            identityResponse.EnsureSuccessStatusCode();
-            var identityToken = (await identityResponse.Content
-                .ReadAsStringAsync(cancellationToken)
-                .ConfigureAwait(false)).Trim();
-            if (string.IsNullOrWhiteSpace(identityToken))
-            {
-                throw new DtaiException(
-                    $"Google identity token provider returned no token for authority '{authority.Name}'.");
-            }
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identityToken);
+            DtaiGoogleAuthority.AddBearerToken(message, identityToken);
         }
 
         using var response = await SharedHttpClient
