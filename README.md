@@ -24,7 +24,8 @@ The DEK is never stored by either authority and is not written by the module.
 - `src/Dtai` — C# library with configuration validation, secure release
   orchestration, AWS Signature Version 4 request signing, envelope validation,
   RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
-- `src/Dtai.Cli` — C# CLI wrapper for tools that need a raw 32-byte DEK file.
+- `src/Dtai.Cli` — executable that releases a DEK in a TEE and encrypts a file
+  with chunked AES-256-GCM without writing the DEK.
 - `test/Dtai.Tests` — dependency-free focused tests for the C# library.
 
 The C# library implements the DTAI protocol and derives the same DEK from the
@@ -163,21 +164,28 @@ finally
 }
 ```
 
-For command-line integrations, the attestation executable receives the
-authority name as its first argument and the challenge JSON on standard input.
-It must write only the signed evidence token/document to standard output. The
-C# CLI takes these inputs:
+For command-line integrations, the attestation executable runs inside the TEE,
+collects its hardware evidence, sends that evidence to Microsoft Azure
+Attestation (MAA), and writes only the resulting signed MAA token to standard
+output. It receives the authority name as its first argument and the challenge
+JSON on standard input; the evidence must bind that challenge. The Azure
+authority adapter presents the MAA token to the Premium Key Vault Secure Key
+Release operation and normalizes the released contribution as described above.
+The C# CLI releases and derives the DEK only in memory, then encrypts the input
+with chunked AES-256-GCM:
 
 ```shell
 dotnet run --project src/Dtai.Cli -- \
   --configuration ./dtai.json \
   --attestation-command /opt/dtai/get-attestation \
   --context 'model://publisher/name/v1' \
-  --output /dev/shm/model.dek
+  --input ./model.bin \
+  --output ./model.bin.dtai
 ```
 
-Run the CLI only inside the attested TEE. Put the output on a TEE-protected
-memory filesystem, consume it immediately, and delete it after loading the
+Run the CLI only inside the attested TEE. The output authenticates its header,
+chunk ordering, final marker, and model context. The 32-byte DEK is zeroed after
+encryption and is never written to disk.
 model. The CLI refuses to overwrite a file and creates it with mode `0600` on
 Unix.
 

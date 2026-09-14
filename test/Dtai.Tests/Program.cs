@@ -13,8 +13,10 @@ public static class Program
         configuration.Validate();
 
         AssertHkdfMatchesRfc5869();
+        await AssertFileEncryptionAsync().ConfigureAwait(false);
         await AssertDerivationIsDeterministicAndBoundAsync().ConfigureAwait(false);
         AssertConfigurationRules();
+        AssertAzureConfigurationRules();
         await AssertEnvelopeChecksAsync().ConfigureAwait(false);
         await AssertAwsAuthorityAsync().ConfigureAwait(false);
         AssertAwsConfigurationRules();
@@ -162,6 +164,58 @@ public static class Program
             "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
             Convert.ToHexString(okm).ToLowerInvariant(),
             "HKDF output did not match RFC 5869.");
+    }
+
+    private static async Task AssertFileEncryptionAsync()
+    {
+        var key = RandomNumberGenerator.GetBytes(32);
+        var expected = RandomNumberGenerator.GetBytes(150_000);
+        await using var input = new MemoryStream(expected);
+        await using var encrypted = new MemoryStream();
+        await DtaiFileEncryption
+            .EncryptAsync(input, encrypted, key, "model://example/v1")
+            .ConfigureAwait(false);
+
+        encrypted.Position = 0;
+        await using var decrypted = new MemoryStream();
+        await DtaiFileEncryption
+            .DecryptAsync(encrypted, decrypted, key, "model://example/v1")
+            .ConfigureAwait(false);
+        AssertEqual(
+            Convert.ToHexString(expected),
+            Convert.ToHexString(decrypted.ToArray()),
+            "File encryption did not round trip.");
+
+        var tampered = encrypted.ToArray();
+        tampered[^1] ^= 1;
+        await AssertThrowsAsync(
+                async () =>
+                {
+                    await using var tamperedInput = new MemoryStream(tampered);
+                    await using var output = new MemoryStream();
+                    await DtaiFileEncryption
+                        .DecryptAsync(tamperedInput, output, key, "model://example/v1")
+                        .ConfigureAwait(false);
+                },
+                "authentication tag")
+            .ConfigureAwait(false);
+
+        CryptographicOperations.ZeroMemory(key);
+        CryptographicOperations.ZeroMemory(expected);
+        CryptographicOperations.ZeroMemory(tampered);
+    }
+
+    private static void AssertAzureConfigurationRules()
+    {
+        NewTestConfiguration().Validate();
+
+        var invalidHost = NewTestConfiguration();
+        invalidHost.Authorities[0].KeyId = "https://example.com/keys/k1/version";
+        AssertThrows(() => invalidHost.Validate(), "Azure Key Vault HTTPS URL");
+
+        var unversioned = NewTestConfiguration();
+        unversioned.Authorities[0].KeyId = "https://vault.vault.azure.net/keys/k1";
+        AssertThrows(() => unversioned.Validate(), "versioned key");
     }
 
     private static async Task AssertDerivationIsDeterministicAndBoundAsync()

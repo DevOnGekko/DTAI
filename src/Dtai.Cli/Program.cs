@@ -5,12 +5,12 @@ using Dtai;
 
 namespace Dtai.Cli;
 
-/// <summary>CLI wrapper that writes a raw 32-byte DEK for tools that cannot host the library.</summary>
+/// <summary>CLI that releases a DEK inside a TEE and uses it to encrypt a file.</summary>
 public static class Program
 {
     private const string Usage = """
         Usage: dtai --configuration <path> --attestation-command <path> \
-                    --context <model-context> --output <path>
+                    --context <model-context> --input <path> --output <path>
         """;
 
     public static async Task<int> Main(string[] args)
@@ -18,6 +18,7 @@ public static class Program
         string? configurationPath = null;
         string? attestationCommand = null;
         string? context = null;
+        string? inputPath = null;
         string? outputPath = null;
 
         for (var index = 0; index < args.Length; index += 2)
@@ -43,6 +44,9 @@ public static class Program
                 case "--output":
                     outputPath = value;
                     break;
+                case "--input":
+                    inputPath = value;
+                    break;
                 default:
                     Console.Error.WriteLine($"Unknown argument '{args[index]}'.\n{Usage}");
                     return 2;
@@ -52,6 +56,7 @@ public static class Program
         if (string.IsNullOrWhiteSpace(configurationPath) ||
             string.IsNullOrWhiteSpace(attestationCommand) ||
             string.IsNullOrWhiteSpace(context) ||
+            string.IsNullOrWhiteSpace(inputPath) ||
             string.IsNullOrWhiteSpace(outputPath))
         {
             Console.Error.WriteLine(Usage);
@@ -60,7 +65,7 @@ public static class Program
 
         try
         {
-            await RunAsync(configurationPath, attestationCommand, context, outputPath)
+            await RunAsync(configurationPath, attestationCommand, context, inputPath, outputPath)
                 .ConfigureAwait(false);
             return 0;
         }
@@ -78,6 +83,7 @@ public static class Program
         string configurationPath,
         string attestationCommand,
         string context,
+        string inputPath,
         string outputPath)
     {
         if (File.Exists(outputPath) || Directory.Exists(outputPath))
@@ -102,7 +108,7 @@ public static class Program
 
         try
         {
-            WriteDek(outputPath, dek);
+            await EncryptFileAsync(inputPath, outputPath, dek, context).ConfigureAwait(false);
         }
         finally
         {
@@ -145,7 +151,11 @@ public static class Program
         return evidence.Trim();
     }
 
-    private static void WriteDek(string outputPath, byte[] dek)
+    private static async Task EncryptFileAsync(
+        string inputPath,
+        string outputPath,
+        byte[] dek,
+        string context)
     {
         var temporaryPath = $"{outputPath}.{Guid.NewGuid():N}.tmp";
         try
@@ -161,9 +171,14 @@ public static class Program
                 options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             }
 
-            using (var stream = new FileStream(temporaryPath, options))
+            await using (var input = new FileStream(
+                             inputPath,
+                             FileMode.Open,
+                             FileAccess.Read,
+                             FileShare.Read))
+            await using (var output = new FileStream(temporaryPath, options))
             {
-                stream.Write(dek);
+                await DtaiFileEncryption.EncryptAsync(input, output, dek, context).ConfigureAwait(false);
             }
             File.Move(temporaryPath, outputPath);
         }

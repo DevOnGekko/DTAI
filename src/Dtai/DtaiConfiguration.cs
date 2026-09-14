@@ -139,10 +139,14 @@ public static class DtaiConfigurationValidator
             {
                 DtaiGoogleAuthority.Validate(authority);
             }
+            if (authority.Provider == DtaiAzureAuthority.Provider)
+            {
+                DtaiAzureAuthority.Validate(authority);
+            }
         }
 
         var azure = configuration.Authorities
-            .Where(authority => authority.Provider == "azure-key-vault")
+            .Where(authority => authority.Provider == DtaiAzureAuthority.Provider)
             .ToList();
         if (azure.Count != 1 || azure[0].Sku != "Premium")
         {
