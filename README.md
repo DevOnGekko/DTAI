@@ -27,7 +27,8 @@ The DEK is never stored by either authority and is not written by the module.
 - `DTAI/dtai.ps1` — CLI wrapper for tools that need a raw 32-byte DEK file.
 - `DTAI/config.example.json` — two-authority configuration example.
 - `test/Dtai.Tests.ps1` — dependency-free focused tests.
-- `src/Dtai` — C# library with the same validation, release, and derivation logic.
+- `src/Dtai` — C# library with the same validation, release, AWS Signature
+  Version 4 signing, and derivation logic.
 - `src/Dtai.Cli` — C# CLI wrapper equivalent to `dtai.ps1`.
 - `test/Dtai.Tests` — dependency-free focused tests for the C# library.
 
@@ -80,8 +81,10 @@ trust. AWS authorities are validated and called with AWS-specific operations:
 - `SigningService` is optional and defaults to `execute-api`; set it to the
   service name that fronts the release endpoint.
 
-Requests to an AWS authority are signed with AWS Signature Version 4 over the
-exact release request body, so the authority can authorize the caller with IAM
+Both the PowerShell module (`Get-DtaiAwsSigV4Headers`) and the C# library
+(`AwsSigV4`, `DtaiAwsAuthority`) implement these operations. Requests to an AWS
+authority are signed with AWS Signature Version 4 over the exact release
+request body, so the authority can authorize the caller with IAM
 and reject tampered or replayed request bodies. Credentials are read from the
 standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional
 `AWS_SESSION_TOKEN` environment variables, which is what an instance, task, or

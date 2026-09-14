@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Dtai;
@@ -13,6 +15,10 @@ public static class DtaiKeyRelease
 
     private static readonly Regex CiphertextPattern =
         new("^[A-Za-z0-9_-]{512}$", RegexOptions.CultureInvariant);
+
+    private const string ReleaseContentType = "application/json";
+
+    private static readonly JsonSerializerOptions RequestOptions = new(JsonSerializerDefaults.Web);
 
     private static readonly HttpClient SharedHttpClient = new()
     {
@@ -193,13 +199,39 @@ public static class DtaiKeyRelease
         }
     }
 
-    private static async Task<DtaiReleaseResponse> PostReleaseRequestAsync(
+    /// <summary>
+    /// Default release client. The request body is serialized once and posted over HTTPS.
+    /// Requests to an <c>aws-kms</c> authority are additionally signed with AWS Signature
+    /// Version 4 over that exact body so the authority can authorize the caller with IAM.
+    /// </summary>
+    public static async Task<DtaiReleaseResponse> PostReleaseRequestAsync(
         DtaiAuthority authority,
         DtaiReleaseRequest request,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(authority);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var payload = JsonSerializer.SerializeToUtf8Bytes(request, RequestOptions);
+        using var message = new HttpRequestMessage(HttpMethod.Post, authority.Endpoint)
+        {
+            Content = new ByteArrayContent(payload)
+        };
+        message.Content.Headers.ContentType = new MediaTypeHeaderValue(ReleaseContentType);
+
+        if (authority.Provider == DtaiAwsAuthority.Provider)
+        {
+            AwsSigV4.Sign(
+                message,
+                authority.Region!,
+                DtaiAwsAuthority.GetSigningService(authority),
+                AwsCredentials.FromEnvironment(authority.Name!),
+                payload,
+                ReleaseContentType);
+        }
+
         using var response = await SharedHttpClient
-            .PostAsJsonAsync(authority.Endpoint, request, cancellationToken)
+            .SendAsync(message, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         return await response.Content
