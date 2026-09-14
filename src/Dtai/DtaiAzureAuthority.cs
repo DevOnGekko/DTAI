@@ -12,7 +12,7 @@ public static class DtaiAzureAuthority
         if (!string.Equals(authority.Sku, "Premium", StringComparison.Ordinal))
         {
             throw new DtaiException(
-                $"Azure Key Vault authority '{authority.Name}' requires the Premium SKU.");
+                $"Azure Key Vault Premium authority '{authority.Name}' requires the Premium SKU.");
         }
 
         if (!Uri.TryCreate(authority.KeyId, UriKind.Absolute, out var keyUri) ||
