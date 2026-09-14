@@ -27,9 +27,6 @@ The DEK is never stored by either authority and is not written by the module.
 - `DTAI/config.example.json` — two-authority configuration example.
 - `test/Dtai.Tests.ps1` — dependency-free focused tests.
 
-The previous Azure Functions key-rotation template remains available for
-operators that still use it; it is not part of the DTAI release path.
-
 ## Authority requirements
 
 Deploy one release service in each cloud under separate administrators,
