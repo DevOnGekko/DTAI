@@ -21,11 +21,14 @@ The DEK is never stored by either authority and is not written by the module.
 
 ## Components
 
-- `DTAI/Dtai.psm1` — configuration validation, secure release orchestration,
-  envelope validation, RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
-- `DTAI/dtai.ps1` — CLI wrapper for tools that need a raw 32-byte DEK file.
-- `DTAI/config.example.json` — two-authority configuration example.
-- `test/Dtai.Tests.ps1` — dependency-free focused tests.
+- `src/Dtai` — C# library with configuration validation, secure release
+  orchestration, AWS Signature Version 4 request signing, envelope validation,
+  RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
+- `src/Dtai.Cli` — C# CLI wrapper for tools that need a raw 32-byte DEK file.
+- `test/Dtai.Tests` — dependency-free focused tests for the C# library.
+
+The C# library implements the DTAI protocol and derives the same DEK from the
+same configuration, context, and contributions.
 
 ## Authority requirements
 
@@ -63,14 +66,40 @@ provider only authorizes KMS access through a bearer token and returns
 plaintext over TLS, use an attestation-aware release broker to meet DTAI's
 stronger recipient-binding requirement.
 
+## AWS secondary trust authority
+
+Set the second authority's `Provider` to `aws-kms` to use AWS for secondary
+trust. AWS authorities are validated and called with AWS-specific operations:
+
+- `Region` is required and must be a valid AWS region such as `us-east-1`;
+- `KeyId` must be an AWS KMS key or alias ARN in that same region; and
+- `SigningService` is optional and defaults to `execute-api`; set it to the
+  service name that fronts the release endpoint.
+
+These operations live in `AwsSigV4` and `DtaiAwsAuthority`. Requests to an AWS
+authority are signed with AWS Signature Version 4 over the exact release request
+body, so the authority can authorize the caller with IAM and reject tampered or
+replayed request bodies. Credentials are read from the
+standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional
+`AWS_SESSION_TOKEN` environment variables, which is what an instance, task, or
+enclave parent role provides. SigV4 only authorizes transport; the contribution
+is still accepted only after the DTAI envelope's nonce, key ID, recipient
+thumbprint, and freshness checks pass.
+
+The AWS authority is expected to validate an AWS Nitro Enclaves attestation
+document, call KMS with the attested recipient (`Recipient` /
+`CiphertextForRecipient` attestation-gated release), and return the normalized
+`DTAI-SKR-v1` response below with the contribution wrapped directly to the
+request's recipient JWK using RSA-OAEP-256.
+
 The release response is:
 
 ```json
 {
   "protocol": "DTAI-SKR-v1",
-  "authority": "authority-azure",
-  "provider": "azure-key-vault",
-  "keyId": "https://example.vault.azure.net/keys/dtai-k1/version",
+  "authority": "authority-aws",
+  "provider": "aws-kms",
+  "keyId": "arn:aws:kms:us-east-1:123456789012:key/dtai-k2",
   "nonce": "base64url-request-nonce",
   "recipientThumbprint": "base64url-RFC7638-thumbprint",
   "issuedAt": "2026-09-14T16:27:20Z",
@@ -83,14 +112,14 @@ checked before a contribution is accepted.
 
 ## Configuration
 
-Copy `DTAI/config.example.json`, then:
+Create a DTAI configuration JSON file, then:
 
 1. replace `DerivationSalt` with at least 16 random bytes encoded as Base64;
 2. configure exactly two HTTPS endpoints on different hosts;
 3. set the Azure provider to `azure-key-vault`, SKU to `Premium`, and use a
    versioned Key Vault key ID;
-4. set the second authority to `google-cloud-kms`, using a versioned Cloud KMS
-   crypto key ID and a `GoogleAudience` accepted by its release service; and
+4. set the second authority to a different provider, such as `aws-kms` with a
+   `Region`, a matching KMS key ARN, and an optional `SigningService`; and
 5. keep `MaxReleaseAgeSeconds` as short as operationally practical (30–900).
 
 The salt is not secret, but it must remain stable for a given encrypted model.
@@ -98,43 +127,42 @@ Use a stable, unambiguous context such as `model://publisher/name/version`.
 Changing the salt, context, key IDs, authority order, or either contribution
 produces a different DEK.
 
-For a Google Cloud secondary authority, deploy the normalized release service
-on a Google workload that can access only its Cloud KMS contribution. The
-default client obtains an identity token from the Google metadata service for
-`GoogleAudience` and presents it as a bearer token to that service. The service
-must validate the token and attestation evidence before using Cloud KMS, then
-return the normalized response with the contribution encrypted directly to the
-recipient JWK. Do not return a plaintext Cloud KMS decrypt result to the
-workload.
-
 ## Use
 
-For in-process use (preferred), import the module and provide an attestation
-callback that receives the exact challenge to place in signed runtime data:
+For in-process use, the C# library is the entry point for .NET workloads. The
+attestation callback receives the exact challenge to place in signed runtime
+data and must return the signed evidence:
 
-```powershell
-Import-Module ./DTAI/Dtai.psm1
-$config = Get-Content ./dtai.json -Raw | ConvertFrom-Json
-$dek = Invoke-DtaiKeyRelease -Configuration $config `
-    -Context 'model://publisher/name/v1' `
-    -AttestationProvider $attestationProvider
-try {
-    # Decrypt and load model weights inside the TEE.
+```csharp
+using Dtai;
+
+var configuration = DtaiConfiguration.Load("./dtai.json");
+var dek = await DtaiKeyRelease.ReleaseAsync(
+    configuration,
+    "model://publisher/name/v1",
+    async (authority, challenge, cancellationToken) =>
+        await attestationClient.GetEvidenceAsync(authority, challenge, cancellationToken));
+try
+{
+    // Decrypt and load model weights inside the TEE.
 }
-finally {
-    [Array]::Clear($dek)
+finally
+{
+    CryptographicOperations.ZeroMemory(dek);
 }
 ```
 
 For command-line integrations, the attestation executable receives the
 authority name as its first argument and the challenge JSON on standard input.
-It must write only the signed evidence token/document to standard output:
+It must write only the signed evidence token/document to standard output. The
+C# CLI takes these inputs:
 
-```powershell
-./DTAI/dtai.ps1 -ConfigurationPath ./dtai.json `
-  -AttestationCommand /opt/dtai/get-attestation `
-  -Context 'model://publisher/name/v1' `
-  -OutputPath /dev/shm/model.dek
+```shell
+dotnet run --project src/Dtai.Cli -- \
+  --configuration ./dtai.json \
+  --attestation-command /opt/dtai/get-attestation \
+  --context 'model://publisher/name/v1' \
+  --output /dev/shm/model.dek
 ```
 
 Run the CLI only inside the attested TEE. Put the output on a TEE-protected
@@ -144,8 +172,9 @@ Unix.
 
 ## Test
 
-PowerShell 7.4 or newer is required.
+The C# tooling requires the .NET 8.0 SDK or newer.
 
-```powershell
-pwsh -NoLogo -NoProfile -File ./test/Dtai.Tests.ps1
+```shell
+dotnet build
+dotnet run --project test/Dtai.Tests
 ```
