@@ -1,8 +1,8 @@
-## Key Vault Rotation Function for [ServiceType] Changelog
+## DTAI Changelog
 
-<a name="Keyvault-Rotation-[ServiceType]-PowerShell"></a>
+<a name="DTAI"></a>
 
-# Keyvault-Rotation-[ServiceType]-PowerShell (2020-12-22)
+# DTAI (2020-12-22)
 
 *Features*
 
