@@ -14,6 +14,15 @@ public sealed class DtaiAuthority
     public string? Endpoint { get; set; }
 
     public string? KeyId { get; set; }
+
+    /// <summary>AWS region, required when <see cref="Provider"/> is <c>aws-kms</c>.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// AWS SigV4 signing service name fronting the release endpoint. Optional; defaults to
+    /// <c>execute-api</c>.
+    /// </summary>
+    public string? SigningService { get; set; }
 }
 
 /// <summary>Security constraints applied to every release.</summary>
@@ -114,6 +123,11 @@ public static class DtaiConfigurationValidator
             if (!names.Add(authority.Name!) || !providers.Add(authority.Provider!) || !hosts.Add(uri.DnsSafeHost))
             {
                 throw new DtaiException("Authorities must have distinct names, providers, and endpoint hosts.");
+            }
+
+            if (authority.Provider == DtaiAwsAuthority.Provider)
+            {
+                DtaiAwsAuthority.Validate(authority);
             }
         }
 

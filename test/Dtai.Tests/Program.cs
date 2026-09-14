@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using Dtai;
 
 namespace Dtai.Tests;
@@ -15,6 +16,11 @@ public static class Program
         await AssertDerivationIsDeterministicAndBoundAsync().ConfigureAwait(false);
         AssertConfigurationRules();
         await AssertEnvelopeChecksAsync().ConfigureAwait(false);
+        await AssertAwsAuthorityAsync().ConfigureAwait(false);
+        AssertAwsConfigurationRules();
+        AssertAwsSigV4Vectors();
+        AssertAwsSigV4SignsRequestMessages();
+        AssertAwsCredentialsAreRequired();
 
         Console.WriteLine("All DTAI tests passed.");
         return 0;
@@ -23,8 +29,34 @@ public static class Program
     private static readonly Dictionary<string, byte[]> Contributions = new()
     {
         ["authority-azure"] = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray(),
-        ["authority-secondary"] = Enumerable.Range(33, 32).Select(value => (byte)value).ToArray()
+        ["authority-secondary"] = Enumerable.Range(33, 32).Select(value => (byte)value).ToArray(),
+        ["authority-aws"] = Enumerable.Range(65, 32).Select(value => (byte)value).ToArray()
     };
+
+    private const string AwsKeyArn =
+        "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555";
+
+    private static DtaiConfiguration NewAwsTestConfiguration(
+        string region = "us-east-1",
+        string keyId = AwsKeyArn,
+        string? signingService = null)
+    {
+        var configuration = NewTestConfiguration();
+        configuration.Authorities = new[]
+        {
+            configuration.Authorities[0],
+            new DtaiAuthority
+            {
+                Name = "authority-aws",
+                Provider = "aws-kms",
+                Region = region,
+                SigningService = signingService,
+                Endpoint = "https://aws-authority.example/v1/release",
+                KeyId = keyId
+            }
+        };
+        return configuration;
+    }
 
     private static DtaiConfiguration NewTestConfiguration() => new()
     {
@@ -206,6 +238,146 @@ public static class Program
                 (authority, challenge, cancellationToken) => Task.FromResult(string.Empty),
                 ReleaseClientAsync),
             "returned no evidence").ConfigureAwait(false);
+    }
+
+    private static async Task AssertAwsAuthorityAsync()
+    {
+        var configuration = NewAwsTestConfiguration();
+        configuration.Validate();
+
+        var dek = await DtaiKeyRelease.ReleaseAsync(
+            configuration, "model://example/v1", AttestationProviderAsync, ReleaseClientAsync)
+            .ConfigureAwait(false);
+        AssertEqual("32", dek.Length.ToString(), "AWS authority DEK length was incorrect.");
+
+        var secondary = await DtaiKeyRelease.ReleaseAsync(
+            NewTestConfiguration(), "model://example/v1", AttestationProviderAsync, ReleaseClientAsync)
+            .ConfigureAwait(false);
+        if (Convert.ToHexString(dek) == Convert.ToHexString(secondary))
+        {
+            throw new InvalidOperationException("Authority binding must change the derived DEK.");
+        }
+    }
+
+    private static void AssertAwsConfigurationRules()
+    {
+        AssertThrows(
+            () => NewAwsTestConfiguration(region: "useast1").Validate(),
+            "valid Region");
+
+        AssertThrows(
+            () => NewAwsTestConfiguration(keyId: "alias/dtai-k2").Validate(),
+            "KMS key or alias ARN");
+
+        AssertThrows(
+            () => NewAwsTestConfiguration(
+                keyId: "arn:aws:kms:eu-west-1:123456789012:key/11111111-2222-3333-4444-555555555555")
+                .Validate(),
+            "KeyId region must match");
+
+        AssertThrows(
+            () => NewAwsTestConfiguration(signingService: "Execute API").Validate(),
+            "SigningService is invalid");
+    }
+
+    private static void AssertAwsSigV4Vectors()
+    {
+        var timestamp = new DateTimeOffset(2026, 9, 14, 16, 27, 20, TimeSpan.Zero);
+        var credentials = new AwsCredentials(
+            "AKIDEXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+
+        var signed = AwsSigV4.CreateSignedHeaders(
+            "POST",
+            new Uri("https://kms.us-east-1.amazonaws.com/"),
+            "us-east-1",
+            "kms",
+            credentials,
+            Encoding.UTF8.GetBytes("{\"a\":1}"),
+            timestamp: timestamp);
+        AssertEqual("20260914T162720Z", signed[AwsSigV4.DateHeader], "SigV4 request date was incorrect.");
+        AssertEqual(
+            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260914/us-east-1/kms/aws4_request, " +
+            "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, " +
+            "Signature=0278237eae5d08c2474a50b9f7936e84e1188dcd611f33280f054078d5cec75c",
+            signed["Authorization"],
+            "SigV4 authorization header did not match the expected signature.");
+        if (signed.ContainsKey(AwsSigV4.SecurityTokenHeader))
+        {
+            throw new InvalidOperationException(
+                "SigV4 headers must omit the security token when no session token is used.");
+        }
+
+        var sessionSigned = AwsSigV4.CreateSignedHeaders(
+            "POST",
+            new Uri("https://api.example.com/v1/release"),
+            "eu-west-2",
+            "execute-api",
+            credentials with { SessionToken = "session-token-value" },
+            Encoding.UTF8.GetBytes("{\"protocol\":\"DTAI-SKR-v1\"}"),
+            timestamp: timestamp);
+        AssertEqual(
+            "session-token-value",
+            sessionSigned[AwsSigV4.SecurityTokenHeader],
+            "SigV4 headers must forward the session token.");
+        AssertEqual(
+            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260914/eu-west-2/execute-api/aws4_request, " +
+            "SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token, " +
+            "Signature=fbff628d14207784e8c02eb9c5988b7e2068ab4749c9090ad52c0f7116893b70",
+            sessionSigned["Authorization"],
+            "SigV4 authorization header with a session token was incorrect.");
+    }
+
+    private static void AssertAwsSigV4SignsRequestMessages()
+    {
+        var payload = Encoding.UTF8.GetBytes("{\"protocol\":\"DTAI-SKR-v1\"}");
+        var timestamp = new DateTimeOffset(2026, 9, 14, 16, 27, 20, TimeSpan.Zero);
+        var credentials = new AwsCredentials(
+            "AKIDEXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+            "session-token-value");
+
+        using var message = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://api.example.com/v1/release");
+        AwsSigV4.Sign(message, "eu-west-2", "execute-api", credentials, payload, timestamp: timestamp);
+
+        var expected = AwsSigV4.CreateSignedHeaders(
+            "POST",
+            new Uri("https://api.example.com/v1/release"),
+            "eu-west-2",
+            "execute-api",
+            credentials,
+            payload,
+            timestamp: timestamp);
+        foreach (var (name, value) in expected)
+        {
+            if (!message.Headers.TryGetValues(name, out var values) ||
+                !string.Equals(string.Join(string.Empty, values), value, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Signed request message is missing header '{name}'.");
+            }
+        }
+    }
+
+    private static void AssertAwsCredentialsAreRequired()
+    {
+        var accessKeyId = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID");
+        var secretAccessKey = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("AWS_ACCESS_KEY_ID", null);
+            Environment.SetEnvironmentVariable("AWS_SECRET_ACCESS_KEY", null);
+            AssertThrows(
+                () => AwsCredentials.FromEnvironment("authority-aws"),
+                "AWS_ACCESS_KEY_ID");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AWS_ACCESS_KEY_ID", accessKeyId);
+            Environment.SetEnvironmentVariable("AWS_SECRET_ACCESS_KEY", secretAccessKey);
+        }
     }
 
     private static void AssertEqual(string expected, string actual, string message)
