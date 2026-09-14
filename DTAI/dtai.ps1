@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ConfigurationPath,
-    [Parameter(Mandatory)][string]$AttestationEvidencePath,
+    [Parameter(Mandatory)][string]$AttestationCommand,
     [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Context,
     [Parameter(Mandatory)][string]$OutputPath
 )
@@ -14,8 +14,17 @@ if (Test-Path -LiteralPath $OutputPath) {
 }
 
 $configuration = Get-Content -LiteralPath $ConfigurationPath -Raw | ConvertFrom-Json
-$evidence = Get-Content -LiteralPath $AttestationEvidencePath -Raw | ConvertFrom-Json
-$dek = Invoke-DtaiKeyRelease -Configuration $configuration -AttestationEvidence $evidence -Context $Context
+$attestationProvider = {
+    param($Authority, $Challenge)
+    $evidence = ($Challenge | ConvertTo-Json -Depth 8 -Compress) |
+        & $AttestationCommand $Authority.Name
+    if ($LASTEXITCODE -ne 0) {
+        throw "Attestation command failed for authority '$($Authority.Name)'."
+    }
+    return $evidence
+}
+$dek = Invoke-DtaiKeyRelease -Configuration $configuration -Context $Context `
+    -AttestationProvider $attestationProvider
 
 $parent = Split-Path -Parent $OutputPath
 if ($parent -and -not (Test-Path -LiteralPath $parent)) {
@@ -24,10 +33,23 @@ if ($parent -and -not (Test-Path -LiteralPath $parent)) {
 
 $temporaryPath = "$OutputPath.$([Guid]::NewGuid().ToString('N')).tmp"
 try {
-    [IO.File]::WriteAllBytes($temporaryPath, $dek)
-    if (-not $IsWindows) {
-        chmod 600 -- $temporaryPath
-        if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict DEK output permissions.' }
+    if ($IsWindows) {
+        [IO.File]::WriteAllBytes($temporaryPath, $dek)
+    }
+    else {
+        $options = [IO.FileStreamOptions]@{
+            Access = [IO.FileAccess]::Write
+            Mode = [IO.FileMode]::CreateNew
+            Share = [IO.FileShare]::None
+            UnixCreateMode = [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite
+        }
+        $stream = [IO.FileStream]::new($temporaryPath, $options)
+        try {
+            $stream.Write($dek)
+        }
+        finally {
+            $stream.Dispose()
+        }
     }
     Move-Item -LiteralPath $temporaryPath -Destination $OutputPath
 }

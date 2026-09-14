@@ -140,8 +140,8 @@ function Invoke-DtaiKeyRelease {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Configuration,
-        [Parameter(Mandatory)]$AttestationEvidence,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Context,
+        [Parameter(Mandatory)][scriptblock]$AttestationProvider,
         [scriptblock]$ReleaseClient
     )
 
@@ -170,15 +170,24 @@ function Invoke-DtaiKeyRelease {
         $thumbprint = Get-DtaiPublicKeyThumbprint $jwk
 
         foreach ($authority in $Configuration.Authorities) {
-            $evidence = $AttestationEvidence.($authority.Name)
-            if ([string]::IsNullOrWhiteSpace([string]$evidence)) {
-                throw "Attestation evidence for authority '$($authority.Name)' is required."
-            }
-
             $nonceBytes = [byte[]]::new(32)
             [Security.Cryptography.RandomNumberGenerator]::Fill($nonceBytes)
             $nonce = ConvertTo-DtaiBase64Url $nonceBytes
             [Array]::Clear($nonceBytes)
+            $challenge = [ordered]@{
+                protocol = 'DTAI-SKR-v1'
+                keyId = $authority.KeyId
+                nonce = $nonce
+                context = $Context
+                recipient = $jwk
+            }
+            $evidence = & $AttestationProvider $authority $challenge
+            if ([string]::IsNullOrWhiteSpace([string]$evidence)) {
+                throw "Attestation provider returned no evidence for authority '$($authority.Name)'."
+            }
+            if ([Text.Encoding]::UTF8.GetByteCount([string]$evidence) -gt 1MB) {
+                throw "Attestation evidence for authority '$($authority.Name)' exceeds 1 MiB."
+            }
             $request = [ordered]@{
                 protocol = 'DTAI-SKR-v1'
                 keyId = $authority.KeyId
@@ -208,6 +217,9 @@ function Invoke-DtaiKeyRelease {
                 throw "Authority '$($authority.Name)' returned a stale release envelope."
             }
 
+            if ([string]$response.ciphertext -notmatch '^[A-Za-z0-9_-]{512}$') {
+                throw "Authority '$($authority.Name)' returned invalid ciphertext."
+            }
             $ciphertext = ConvertFrom-DtaiBase64Url $response.ciphertext
             try {
                 $contribution = $rsa.Decrypt(

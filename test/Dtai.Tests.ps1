@@ -89,6 +89,10 @@ $contributions = @{
 }
 $releaseClient = {
     param($Authority, $Request)
+    $expectedEvidence = "attestation:$($Authority.Name):$($Request.nonce):$(Get-TestThumbprint $Request.recipient)"
+    if ($Request.attestationEvidence -cne $expectedEvidence) {
+        throw 'Attestation evidence was not bound to the release challenge.'
+    }
     $rsa = [Security.Cryptography.RSA]::Create()
     try {
         $rsa.ImportParameters([Security.Cryptography.RSAParameters]@{
@@ -115,14 +119,12 @@ $releaseClient = {
     }
 }
 
-$dek1 = Invoke-DtaiKeyRelease $configuration @{
-    'authority-azure' = 'azure-attestation-token'
-    'authority-secondary' = 'secondary-attestation-token'
-} 'model://example/v1' $releaseClient
-$dek2 = Invoke-DtaiKeyRelease $configuration @{
-    'authority-azure' = 'azure-attestation-token'
-    'authority-secondary' = 'secondary-attestation-token'
-} 'model://example/v1' $releaseClient
+$attestationProvider = {
+    param($Authority, $Challenge)
+    return "attestation:$($Authority.Name):$($Challenge.nonce):$(Get-TestThumbprint $Challenge.recipient)"
+}
+$dek1 = Invoke-DtaiKeyRelease $configuration 'model://example/v1' $attestationProvider $releaseClient
+$dek2 = Invoke-DtaiKeyRelease $configuration 'model://example/v1' $attestationProvider $releaseClient
 Assert-Equal 32 $dek1.Length 'DEK length was incorrect.'
 Assert-Equal ([Convert]::ToHexString($dek1)) ([Convert]::ToHexString($dek2)) 'Derivation was not deterministic.'
 if ([Convert]::ToHexString($dek1) -eq [Convert]::ToHexString($contributions['authority-azure'])) {
@@ -144,10 +146,7 @@ $staleClient = {
     return $response
 }
 Assert-Throws {
-    Invoke-DtaiKeyRelease $configuration @{
-        'authority-azure' = 'azure-attestation-token'
-        'authority-secondary' = 'secondary-attestation-token'
-    } 'model://example/v1' $staleClient
+    Invoke-DtaiKeyRelease $configuration 'model://example/v1' $attestationProvider $staleClient
 } '*stale release envelope*'
 
 $unboundClient = {
@@ -157,10 +156,7 @@ $unboundClient = {
     return $response
 }
 Assert-Throws {
-    Invoke-DtaiKeyRelease $configuration @{
-        'authority-azure' = 'azure-attestation-token'
-        'authority-secondary' = 'secondary-attestation-token'
-    } 'model://example/v1' $unboundClient
+    Invoke-DtaiKeyRelease $configuration 'model://example/v1' $attestationProvider $unboundClient
 } '*invalid or unbound release envelope*'
 
 Write-Host 'All DTAI tests passed.'
