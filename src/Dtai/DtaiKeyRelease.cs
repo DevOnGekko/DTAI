@@ -25,6 +25,11 @@ public static class DtaiKeyRelease
         Timeout = TimeSpan.FromSeconds(30)
     };
 
+    private static readonly HttpClient GoogleMetadataHttpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(10)
+    };
+
     /// <summary>
     /// Requests both contributions, validates their release envelopes, unwraps them with the
     /// ephemeral recipient key, and derives the 256-bit model DEK.
@@ -228,6 +233,13 @@ public static class DtaiKeyRelease
                 AwsCredentials.FromEnvironment(authority.Name!),
                 payload,
                 ReleaseContentType);
+        }
+        else if (authority.Provider == DtaiGoogleAuthority.Provider)
+        {
+            var identityToken = await DtaiGoogleAuthority
+                .GetIdentityTokenAsync(authority, GoogleMetadataHttpClient, cancellationToken)
+                .ConfigureAwait(false);
+            DtaiGoogleAuthority.AddBearerToken(message, identityToken);
         }
 
         using var response = await SharedHttpClient

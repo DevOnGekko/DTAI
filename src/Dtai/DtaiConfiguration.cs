@@ -23,6 +23,12 @@ public sealed class DtaiAuthority
     /// <c>execute-api</c>.
     /// </summary>
     public string? SigningService { get; set; }
+
+    /// <summary>
+    /// Google workload identity token audience, required when <see cref="Provider"/> is
+    /// <c>google-cloud-kms</c>.
+    /// </summary>
+    public string? GoogleAudience { get; set; }
 }
 
 /// <summary>Security constraints applied to every release.</summary>
@@ -128,6 +134,10 @@ public static class DtaiConfigurationValidator
             if (authority.Provider == DtaiAwsAuthority.Provider)
             {
                 DtaiAwsAuthority.Validate(authority);
+            }
+            if (authority.Provider == DtaiGoogleAuthority.Provider)
+            {
+                DtaiGoogleAuthority.Validate(authority);
             }
         }
 
