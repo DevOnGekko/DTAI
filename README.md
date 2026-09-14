@@ -21,17 +21,14 @@ The DEK is never stored by either authority and is not written by the module.
 
 ## Components
 
-- `DTAI/Dtai.psm1` — configuration validation, secure release orchestration,
-  envelope validation, RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
-- `DTAI/dtai.ps1` — CLI wrapper for tools that need a raw 32-byte DEK file.
-- `DTAI/config.example.json` — two-authority configuration example.
-- `test/Dtai.Tests.ps1` — dependency-free focused tests.
-- `src/Dtai` — C# library with the same validation, release, and derivation logic.
-- `src/Dtai.Cli` — C# CLI wrapper equivalent to `dtai.ps1`.
+- `src/Dtai` — C# library with configuration validation, secure release
+  orchestration, envelope validation, RSA-OAEP-256 unwrapping, and
+  HKDF-SHA-256 derivation.
+- `src/Dtai.Cli` — C# CLI wrapper for tools that need a raw 32-byte DEK file.
 - `test/Dtai.Tests` — dependency-free focused tests for the C# library.
 
-The PowerShell module and the C# library implement the same protocol and
-derive the same DEK from the same configuration, context, and contributions.
+The C# library implements the DTAI protocol and derives the same DEK from the
+same configuration, context, and contributions.
 
 ## Authority requirements
 
@@ -89,7 +86,7 @@ checked before a contribution is accepted.
 
 ## Configuration
 
-Copy `DTAI/config.example.json`, then:
+Create a DTAI configuration JSON file, then:
 
 1. replace `DerivationSalt` with at least 16 random bytes encoded as Base64;
 2. configure exactly two HTTPS endpoints on different hosts;
@@ -105,37 +102,9 @@ produces a different DEK.
 
 ## Use
 
-For in-process use (preferred), import the module and provide an attestation
-callback that receives the exact challenge to place in signed runtime data:
-
-```powershell
-Import-Module ./DTAI/Dtai.psm1
-$config = Get-Content ./dtai.json -Raw | ConvertFrom-Json
-$dek = Invoke-DtaiKeyRelease -Configuration $config `
-    -Context 'model://publisher/name/v1' `
-    -AttestationProvider $attestationProvider
-try {
-    # Decrypt and load model weights inside the TEE.
-}
-finally {
-    [Array]::Clear($dek)
-}
-```
-
-For command-line integrations, the attestation executable receives the
-authority name as its first argument and the challenge JSON on standard input.
-It must write only the signed evidence token/document to standard output:
-
-```powershell
-./DTAI/dtai.ps1 -ConfigurationPath ./dtai.json `
-  -AttestationCommand /opt/dtai/get-attestation `
-  -Context 'model://publisher/name/v1' `
-  -OutputPath /dev/shm/model.dek
-```
-
-The C# library is the equivalent entry point for .NET workloads. The
-attestation callback receives the same challenge and must return the signed
-evidence:
+For in-process use, the C# library is the entry point for .NET workloads. The
+attestation callback receives the exact challenge to place in signed runtime
+data and must return the signed evidence:
 
 ```csharp
 using Dtai;
@@ -156,7 +125,10 @@ finally
 }
 ```
 
-The C# CLI takes the same inputs as `dtai.ps1`:
+For command-line integrations, the attestation executable receives the
+authority name as its first argument and the challenge JSON on standard input.
+It must write only the signed evidence token/document to standard output. The
+C# CLI takes these inputs:
 
 ```shell
 dotnet run --project src/Dtai.Cli -- \
@@ -172,12 +144,6 @@ model. The CLI refuses to overwrite a file and creates it with mode `0600` on
 Unix.
 
 ## Test
-
-PowerShell 7.4 or newer is required.
-
-```powershell
-pwsh -NoLogo -NoProfile -File ./test/Dtai.Tests.ps1
-```
 
 The C# tooling requires the .NET 8.0 SDK or newer.
 

@@ -3,7 +3,7 @@ using Dtai;
 
 namespace Dtai.Tests;
 
-/// <summary>Dependency-free focused tests mirroring test/Dtai.Tests.ps1.</summary>
+/// <summary>Dependency-free focused tests for the DTAI C# library.</summary>
 public static class Program
 {
     public static async Task<int> Main()
