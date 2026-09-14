@@ -15,6 +15,12 @@ public sealed class DtaiAuthority
 
     public string? KeyId { get; set; }
 
+    /// <summary>
+    /// Google Cloud audience for the identity token, required when
+    /// <see cref="Provider"/> is <c>google-cloud-kms</c>.
+    /// </summary>
+    public string? GoogleAudience { get; set; }
+
     /// <summary>AWS region, required when <see cref="Provider"/> is <c>aws-kms</c>.</summary>
     public string? Region { get; set; }
 
@@ -128,6 +134,10 @@ public static class DtaiConfigurationValidator
             if (authority.Provider == DtaiAwsAuthority.Provider)
             {
                 DtaiAwsAuthority.Validate(authority);
+            }
+            if (authority.Provider == DtaiGoogleAuthority.Provider)
+            {
+                DtaiGoogleAuthority.Validate(authority);
             }
         }
 

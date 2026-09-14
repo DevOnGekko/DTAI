@@ -229,6 +229,26 @@ public static class DtaiKeyRelease
                 payload,
                 ReleaseContentType);
         }
+        else if (authority.Provider == DtaiGoogleAuthority.Provider)
+        {
+            using var identityRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={Uri.EscapeDataString(authority.GoogleAudience!)}&format=full");
+            identityRequest.Headers.Add("Metadata-Flavor", "Google");
+            using var identityResponse = await SharedHttpClient
+                .SendAsync(identityRequest, cancellationToken)
+                .ConfigureAwait(false);
+            identityResponse.EnsureSuccessStatusCode();
+            var identityToken = (await identityResponse.Content
+                .ReadAsStringAsync(cancellationToken)
+                .ConfigureAwait(false)).Trim();
+            if (string.IsNullOrWhiteSpace(identityToken))
+            {
+                throw new DtaiException(
+                    $"Google identity token provider returned no token for authority '{authority.Name}'.");
+            }
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identityToken);
+        }
 
         using var response = await SharedHttpClient
             .SendAsync(message, cancellationToken)

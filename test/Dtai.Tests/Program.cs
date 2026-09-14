@@ -18,6 +18,7 @@ public static class Program
         await AssertEnvelopeChecksAsync().ConfigureAwait(false);
         await AssertAwsAuthorityAsync().ConfigureAwait(false);
         AssertAwsConfigurationRules();
+        AssertGoogleConfigurationRules();
         AssertAwsSigV4Vectors();
         AssertAwsSigV4SignsRequestMessages();
         AssertAwsCredentialsAreRequired();
@@ -80,9 +81,10 @@ public static class Program
             new DtaiAuthority
             {
                 Name = "authority-secondary",
-                Provider = "secondary-cloud-kms",
-                Endpoint = "https://secondary-authority.example/release",
-                KeyId = "projects/example/keys/k2"
+                Provider = "google-cloud-kms",
+                Endpoint = "https://google-authority.example/release",
+                GoogleAudience = "https://google-authority.example",
+                KeyId = "projects/example/locations/us-central1/keyRings/dtai/cryptoKeys/k2/cryptoKeyVersions/1"
             }
         }
     };
@@ -278,6 +280,21 @@ public static class Program
         AssertThrows(
             () => NewAwsTestConfiguration(signingService: "Execute API").Validate(),
             "SigningService is invalid");
+    }
+
+    private static void AssertGoogleConfigurationRules()
+    {
+        var invalidKeyId = NewTestConfiguration();
+        invalidKeyId.Authorities[1].KeyId = "projects/example/keys/k2";
+        AssertThrows(
+            () => invalidKeyId.Validate(),
+            "KeyId must identify a crypto key version");
+
+        var missingAudience = NewTestConfiguration();
+        missingAudience.Authorities[1].GoogleAudience = null;
+        AssertThrows(
+            () => missingAudience.Validate(),
+            "HTTPS GoogleAudience");
     }
 
     private static void AssertAwsSigV4Vectors()
