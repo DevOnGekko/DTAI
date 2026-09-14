@@ -48,13 +48,23 @@ identities, audit sinks, and authorization policies. Each service must:
 - return the response below over authenticated HTTPS without logging evidence,
   contributions, ciphertext plaintext, or derived keys.
 
-For the Azure authority, provision an exportable, HSM-backed release key in a
-Premium Key Vault and attach an Azure Secure Key Release policy restricted to
-the approved Microsoft Azure Attestation claims. The second authority must use
-a different provider's equivalent attestation-gated KMS release mechanism.
-Cloud-specific adapters translate their native release envelope to the small
-DTAI response contract; they must not unwrap a contribution outside the
-attested workload.
+For the Azure authority, create an exportable HSM-backed key in a Premium Key
+Vault with its release policy on the first key version. Grant only
+`keys/release`, and restrict the policy to approved Microsoft Azure Attestation
+claims. Secure Key Release applies to keys, not Key Vault secrets or
+certificates. The second authority must use a different provider's
+attestation-gated KMS mechanism.
+
+This client implements a normalized DTAI authority protocol, not the native
+Azure `/release` response format. Azure returns a signed object containing a
+`key_hsm` blob wrapped with its selected PKCS#11 key-wrap mechanism; that value
+is not raw RSA ciphertext. A provider adapter is therefore a deployment
+prerequisite. It must preserve recipient-key binding and either run inside the
+same TEE or have the authority produce the normalized response directly. It
+must never unwrap a contribution outside an attested TEE. If the second
+provider only authorizes KMS access through a bearer token and returns
+plaintext over TLS, use an attestation-aware release broker to meet DTAI's
+stronger recipient-binding requirement.
 
 The release response is:
 
