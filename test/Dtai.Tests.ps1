@@ -40,9 +40,10 @@ function New-TestConfiguration {
             },
             [pscustomobject]@{
                 Name = 'authority-secondary'
-                Provider = 'secondary-cloud-kms'
-                Endpoint = 'https://secondary-authority.example/release'
-                KeyId = 'projects/example/keys/k2'
+                Provider = 'google-cloud-kms'
+                Endpoint = 'https://google-authority.example/release'
+                GoogleAudience = 'https://google-authority.example'
+                KeyId = 'projects/example/locations/us-central1/keyRings/dtai/cryptoKeys/k2/cryptoKeyVersions/1'
             }
         )
     }
@@ -138,6 +139,23 @@ Assert-Throws { Assert-DtaiConfiguration $nonPremium } '*Azure Key Vault Premium
 $sameProvider = New-TestConfiguration
 $sameProvider.Authorities[1].Provider = 'azure-key-vault'
 Assert-Throws { Assert-DtaiConfiguration $sameProvider } '*distinct names, providers*'
+
+$invalidGoogleKey = New-TestConfiguration
+$invalidGoogleKey.Authorities[1].KeyId = 'projects/example/keys/k2'
+Assert-Throws { Assert-DtaiConfiguration $invalidGoogleKey } '*Google Cloud KMS KeyId*'
+
+$missingGoogleAudience = New-TestConfiguration
+$missingGoogleAudience.Authorities[1].PSObject.Properties.Remove('GoogleAudience')
+Assert-Throws { Assert-DtaiConfiguration $missingGoogleAudience } '*GoogleAudience*'
+
+$googleFirst = New-TestConfiguration
+[Array]::Reverse($googleFirst.Authorities)
+Assert-Throws {
+    Invoke-DtaiKeyRelease $googleFirst 'model://example/v1' $attestationProvider $null {
+        param($Authority)
+        return ''
+    }
+} '*Google identity token provider returned no token*'
 
 $staleClient = {
     param($Authority, $Request)

@@ -66,6 +66,19 @@ function Assert-DtaiConfiguration {
     if ($azure.Count -ne 1 -or $azure[0].Sku -ne 'Premium') {
         throw "Exactly one authority must use an Azure Key Vault Premium key."
     }
+    $google = @($Configuration.Authorities | Where-Object Provider -eq 'google-cloud-kms')
+    if ($google.Count -ne 1) {
+        throw "Exactly one authority must use Google Cloud KMS."
+    }
+    if ($google[0].KeyId -notmatch '^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/[^/]+$') {
+        throw "Google Cloud KMS KeyId must identify a crypto key version."
+    }
+    $googleAudience = $null
+    if ([string]::IsNullOrWhiteSpace([string]$google[0].GoogleAudience) -or
+        -not [Uri]::TryCreate([string]$google[0].GoogleAudience, [UriKind]::Absolute, [ref]$googleAudience) -or
+        $googleAudience.Scheme -ne 'https') {
+        throw "Google Cloud KMS authority must specify an absolute GoogleAudience."
+    }
 
     if ($Configuration.Security.MaxReleaseAgeSeconds -lt 30 -or
         $Configuration.Security.MaxReleaseAgeSeconds -gt 900) {
@@ -142,16 +155,35 @@ function Invoke-DtaiKeyRelease {
         [Parameter(Mandatory)]$Configuration,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Context,
         [Parameter(Mandatory)][scriptblock]$AttestationProvider,
-        [scriptblock]$ReleaseClient
+        [scriptblock]$ReleaseClient,
+        [scriptblock]$GoogleIdentityTokenProvider
     )
 
     Assert-DtaiConfiguration $Configuration
     if ($Context.Length -gt 1024) {
         throw 'Context must not exceed 1024 characters.'
     }
+    if ($null -eq $GoogleIdentityTokenProvider) {
+        $GoogleIdentityTokenProvider = {
+            param($Authority)
+            $audience = [Uri]::EscapeDataString($Authority.GoogleAudience)
+            $metadataUri = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience=$audience&format=full"
+            return Invoke-RestMethod -Method Get -Uri $metadataUri -Headers @{ 'Metadata-Flavor' = 'Google' } -TimeoutSec 10
+        }
+    }
     if ($null -eq $ReleaseClient) {
         $ReleaseClient = {
             param($Authority, $Request)
+            if ($Authority.Provider -eq 'google-cloud-kms') {
+                $identityToken = & $GoogleIdentityTokenProvider $Authority
+                if ([string]::IsNullOrWhiteSpace([string]$identityToken)) {
+                    throw "Google identity token provider returned no token for authority '$($Authority.Name)'."
+                }
+                $headers = @{ Authorization = ('Bearer ' + $identityToken) }
+                return Invoke-RestMethod -Method Post -Uri $Authority.Endpoint -ContentType 'application/json' `
+                    -Headers $headers `
+                    -Body ($Request | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 30
+            }
             Invoke-RestMethod -Method Post -Uri $Authority.Endpoint -ContentType 'application/json' `
                 -Body ($Request | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 30
         }

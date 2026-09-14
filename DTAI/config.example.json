@@ -19,9 +19,10 @@
     },
     {
       "Name": "authority-secondary",
-      "Provider": "secondary-cloud-kms",
-      "Endpoint": "https://secondary-authority.example.net/v1/release",
-      "KeyId": "provider-specific-key-id"
+      "Provider": "google-cloud-kms",
+      "Endpoint": "https://google-authority.example.net/v1/release",
+      "GoogleAudience": "https://google-authority.example.net",
+      "KeyId": "projects/example/locations/us-central1/keyRings/dtai/cryptoKeys/contribution/cryptoKeyVersions/1"
     }
   ]
 }
