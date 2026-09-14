@@ -48,6 +48,18 @@ function New-TestConfiguration {
     }
 }
 
+function New-TestAwsConfiguration {
+    $configuration = New-TestConfiguration
+    $configuration.Authorities[1] = [pscustomobject]@{
+        Name = 'authority-aws'
+        Provider = 'aws-kms'
+        Region = 'us-east-1'
+        Endpoint = 'https://aws-authority.example/v1/release'
+        KeyId = 'arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555'
+    }
+    return $configuration
+}
+
 function ConvertFrom-TestBase64Url {
     param([string]$Value)
     $padded = $Value.Replace('-', '+').Replace('_', '/')
@@ -129,6 +141,82 @@ Assert-Equal 32 $dek1.Length 'DEK length was incorrect.'
 Assert-Equal ([Convert]::ToHexString($dek1)) ([Convert]::ToHexString($dek2)) 'Derivation was not deterministic.'
 if ([Convert]::ToHexString($dek1) -eq [Convert]::ToHexString($contributions['authority-azure'])) {
     throw 'Derived DEK must not equal an individual contribution.'
+}
+
+# AWS secondary trust authority
+$awsConfiguration = New-TestAwsConfiguration
+Assert-DtaiConfiguration $awsConfiguration
+
+$contributions['authority-aws'] = [byte[]](65..96)
+$awsDek = Invoke-DtaiKeyRelease $awsConfiguration 'model://example/v1' $attestationProvider $releaseClient
+Assert-Equal 32 $awsDek.Length 'AWS authority DEK length was incorrect.'
+if ([Convert]::ToHexString($awsDek) -eq [Convert]::ToHexString($dek1)) {
+    throw 'Authority binding must change the derived DEK.'
+}
+
+$badRegion = New-TestAwsConfiguration
+$badRegion.Authorities[1].Region = 'useast1'
+Assert-Throws { Assert-DtaiConfiguration $badRegion } '*valid Region*'
+
+$badArn = New-TestAwsConfiguration
+$badArn.Authorities[1].KeyId = 'alias/dtai-k2'
+Assert-Throws { Assert-DtaiConfiguration $badArn } '*KMS key or alias ARN*'
+
+$mismatchedRegion = New-TestAwsConfiguration
+$mismatchedRegion.Authorities[1].KeyId =
+    'arn:aws:kms:eu-west-1:123456789012:key/11111111-2222-3333-4444-555555555555'
+Assert-Throws { Assert-DtaiConfiguration $mismatchedRegion } '*KeyId region must match*'
+
+$badSigningService = New-TestAwsConfiguration
+$badSigningService.Authorities[1] |
+    Add-Member -NotePropertyName SigningService -NotePropertyValue 'Execute API'
+Assert-Throws { Assert-DtaiConfiguration $badSigningService } '*SigningService is invalid*'
+
+# AWS Signature Version 4 vector cross-checked against the AWS SDK signer
+$signed = Get-DtaiAwsSigV4Headers -Method 'POST' `
+    -Uri ([Uri]'https://kms.us-east-1.amazonaws.com/') -Region 'us-east-1' -Service 'kms' `
+    -AccessKeyId 'AKIDEXAMPLE' -SecretAccessKey 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY' `
+    -Payload ([Text.Encoding]::UTF8.GetBytes('{"a":1}')) `
+    -Timestamp ([DateTimeOffset]::new(2026, 9, 14, 16, 27, 20, [TimeSpan]::Zero))
+Assert-Equal '20260914T162720Z' $signed['X-Amz-Date'] 'SigV4 request date was incorrect.'
+Assert-Equal `
+    ('AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260914/us-east-1/kms/aws4_request, ' +
+     'SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, ' +
+     'Signature=0278237eae5d08c2474a50b9f7936e84e1188dcd611f33280f054078d5cec75c') `
+    $signed['Authorization'] `
+    'SigV4 authorization header did not match the expected signature.'
+if ($signed.Contains('X-Amz-Security-Token')) {
+    throw 'SigV4 headers must omit the security token when no session token is used.'
+}
+
+$sessionSigned = Get-DtaiAwsSigV4Headers -Method 'POST' `
+    -Uri ([Uri]'https://api.example.com/v1/release') -Region 'eu-west-2' -Service 'execute-api' `
+    -AccessKeyId 'AKIDEXAMPLE' -SecretAccessKey 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY' `
+    -SessionToken 'session-token-value' `
+    -Payload ([Text.Encoding]::UTF8.GetBytes('{"protocol":"DTAI-SKR-v1"}')) `
+    -Timestamp ([DateTimeOffset]::new(2026, 9, 14, 16, 27, 20, [TimeSpan]::Zero))
+Assert-Equal 'session-token-value' $sessionSigned['X-Amz-Security-Token'] `
+    'SigV4 headers must forward the session token.'
+Assert-Equal `
+    ('AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260914/eu-west-2/execute-api/aws4_request, ' +
+     'SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date;x-amz-security-token, ' +
+     'Signature=fbff628d14207784e8c02eb9c5988b7e2068ab4749c9090ad52c0f7116893b70') `
+    $sessionSigned['Authorization'] `
+    'SigV4 authorization header with a session token was incorrect.'
+
+$previousAccessKeyId = $env:AWS_ACCESS_KEY_ID
+$previousSecretAccessKey = $env:AWS_SECRET_ACCESS_KEY
+try {
+    $env:AWS_ACCESS_KEY_ID = ''
+    $env:AWS_SECRET_ACCESS_KEY = ''
+    Assert-Throws {
+        Invoke-DtaiAuthorityRelease -Authority $awsConfiguration.Authorities[1] `
+            -Request ([ordered]@{ protocol = 'DTAI-SKR-v1' })
+    } '*AWS_ACCESS_KEY_ID*'
+}
+finally {
+    $env:AWS_ACCESS_KEY_ID = $previousAccessKeyId
+    $env:AWS_SECRET_ACCESS_KEY = $previousSecretAccessKey
 }
 
 $nonPremium = New-TestConfiguration

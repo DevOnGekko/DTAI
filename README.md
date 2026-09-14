@@ -22,7 +22,8 @@ The DEK is never stored by either authority and is not written by the module.
 ## Components
 
 - `DTAI/Dtai.psm1` — configuration validation, secure release orchestration,
-  envelope validation, RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
+  AWS Signature Version 4 request signing, envelope validation, RSA-OAEP-256
+  unwrapping, and HKDF-SHA-256 derivation.
 - `DTAI/dtai.ps1` — CLI wrapper for tools that need a raw 32-byte DEK file.
 - `DTAI/config.example.json` — two-authority configuration example.
 - `test/Dtai.Tests.ps1` — dependency-free focused tests.
@@ -63,14 +64,39 @@ provider only authorizes KMS access through a bearer token and returns
 plaintext over TLS, use an attestation-aware release broker to meet DTAI's
 stronger recipient-binding requirement.
 
+## AWS secondary trust authority
+
+Set the second authority's `Provider` to `aws-kms` to use AWS for secondary
+trust. AWS authorities are validated and called with AWS-specific operations:
+
+- `Region` is required and must be a valid AWS region such as `us-east-1`;
+- `KeyId` must be an AWS KMS key or alias ARN in that same region; and
+- `SigningService` is optional and defaults to `execute-api`; set it to the
+  service name that fronts the release endpoint.
+
+Requests to an AWS authority are signed with AWS Signature Version 4 over the
+exact release request body, so the authority can authorize the caller with IAM
+and reject tampered or replayed request bodies. Credentials are read from the
+standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional
+`AWS_SESSION_TOKEN` environment variables, which is what an instance, task, or
+enclave parent role provides. SigV4 only authorizes transport; the contribution
+is still accepted only after the DTAI envelope's nonce, key ID, recipient
+thumbprint, and freshness checks pass.
+
+The AWS authority is expected to validate an AWS Nitro Enclaves attestation
+document, call KMS with the attested recipient (`Recipient` /
+`CiphertextForRecipient` attestation-gated release), and return the normalized
+`DTAI-SKR-v1` response below with the contribution wrapped directly to the
+request's recipient JWK using RSA-OAEP-256.
+
 The release response is:
 
 ```json
 {
   "protocol": "DTAI-SKR-v1",
-  "authority": "authority-azure",
-  "provider": "azure-key-vault",
-  "keyId": "https://example.vault.azure.net/keys/dtai-k1/version",
+  "authority": "authority-aws",
+  "provider": "aws-kms",
+  "keyId": "arn:aws:kms:us-east-1:123456789012:key/dtai-k2",
   "nonce": "base64url-request-nonce",
   "recipientThumbprint": "base64url-RFC7638-thumbprint",
   "issuedAt": "2026-09-14T16:27:20Z",
@@ -89,7 +115,8 @@ Copy `DTAI/config.example.json`, then:
 2. configure exactly two HTTPS endpoints on different hosts;
 3. set the Azure provider to `azure-key-vault`, SKU to `Premium`, and use a
    versioned Key Vault key ID;
-4. set the second authority to a different provider; and
+4. set the second authority to a different provider, such as `aws-kms` with a
+   `Region`, a matching KMS key ARN, and an optional `SigningService`; and
 5. keep `MaxReleaseAgeSeconds` as short as operationally practical (30–900).
 
 The salt is not secret, but it must remain stable for a given encrypted model.

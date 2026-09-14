@@ -1,6 +1,9 @@
 Set-StrictMode -Version Latest
 
 $script:SupportedTeeTypes = @('IntelTDX', 'AMD-SEV-SNP', 'AzureConfidentialVM')
+$script:AwsProvider = 'aws-kms'
+$script:AwsRegionPattern = '^[a-z]{2}(-[a-z]+)+-\d$'
+$script:AwsKeyArnPattern = '^arn:aws[a-z-]*:kms:(?<region>[a-z0-9-]+):\d{12}:(key/|alias/).+$'
 
 function ConvertTo-DtaiBase64Url {
     param([Parameter(Mandatory)][byte[]]$Bytes)
@@ -26,6 +29,43 @@ function Get-DtaiPublicKeyThumbprint {
     $canonical = '{"e":"' + $Jwk.e + '","kty":"RSA","n":"' + $Jwk.n + '"}'
     $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical))
     return ConvertTo-DtaiBase64Url $hash
+}
+
+function Get-DtaiProperty {
+    param(
+        [Parameter(Mandatory)]$InputObject,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($InputObject -is [Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) { return $InputObject[$Name] }
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Assert-DtaiAwsAuthority {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Authority)
+
+    $region = [string](Get-DtaiProperty $Authority 'Region')
+    if ($region -notmatch $script:AwsRegionPattern) {
+        throw "AWS authority '$($Authority.Name)' requires a valid Region such as 'us-east-1'."
+    }
+    $keyArn = [regex]::Match([string]$Authority.KeyId, $script:AwsKeyArnPattern)
+    if (-not $keyArn.Success) {
+        throw "AWS authority '$($Authority.Name)' KeyId must be an AWS KMS key or alias ARN."
+    }
+    if ($keyArn.Groups['region'].Value -cne $region) {
+        throw "AWS authority '$($Authority.Name)' KeyId region must match Region '$region'."
+    }
+
+    $service = Get-DtaiProperty $Authority 'SigningService'
+    if ($null -ne $service -and [string]$service -notmatch '^[a-z0-9-]{2,32}$') {
+        throw "AWS authority '$($Authority.Name)' SigningService is invalid."
+    }
 }
 
 function Assert-DtaiConfiguration {
@@ -60,6 +100,10 @@ function Assert-DtaiConfiguration {
         $names[$authority.Name] = $true
         $providers[$authority.Provider] = $true
         $hosts[$uri.DnsSafeHost] = $true
+
+        if ($authority.Provider -eq $script:AwsProvider) {
+            Assert-DtaiAwsAuthority $authority
+        }
     }
 
     $azure = @($Configuration.Authorities | Where-Object Provider -eq 'azure-key-vault')
@@ -136,6 +180,157 @@ function Invoke-DtaiHkdfSha256 {
     }
 }
 
+function Get-DtaiAwsSigV4Headers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Method,
+        [Parameter(Mandatory)][Uri]$Uri,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Region,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Service,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$AccessKeyId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$SecretAccessKey,
+        [string]$SessionToken,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Payload,
+        [ValidateNotNullOrEmpty()][string]$ContentType = 'application/json',
+        [DateTimeOffset]$Timestamp = [DateTimeOffset]::UtcNow
+    )
+
+    $amzDate = $Timestamp.ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+    $dateStamp = $Timestamp.ToUniversalTime().ToString('yyyyMMdd')
+    $payloadHash = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($Payload)
+    ).ToLowerInvariant()
+
+    $canonicalPath = '/'
+    if ($Uri.AbsolutePath -ne '/' -and -not [string]::IsNullOrEmpty($Uri.AbsolutePath)) {
+        $canonicalPath = ($Uri.AbsolutePath.Split('/') | ForEach-Object {
+            [Uri]::EscapeDataString([Uri]::UnescapeDataString($_))
+        }) -join '/'
+    }
+
+    $canonicalQuery = ''
+    if ($Uri.Query.Length -gt 1) {
+        $pairs = foreach ($part in $Uri.Query.TrimStart('?').Split('&')) {
+            if ($part.Length -eq 0) { continue }
+            $split = $part.Split('=', 2)
+            $name = [Uri]::EscapeDataString([Uri]::UnescapeDataString($split[0]))
+            $value = ''
+            if ($split.Count -eq 2) {
+                $value = [Uri]::EscapeDataString([Uri]::UnescapeDataString($split[1]))
+            }
+            , @($name, $value)
+        }
+        $canonicalQuery = (@($pairs) | Sort-Object { $_[0] }, { $_[1] } | ForEach-Object {
+            "$($_[0])=$($_[1])"
+        }) -join '&'
+    }
+
+    $headers = [ordered]@{
+        'content-type' = $ContentType
+        'host' = $Uri.IdnHost + $(if ($Uri.IsDefaultPort) { '' } else { ":$($Uri.Port)" })
+        'x-amz-content-sha256' = $payloadHash
+        'x-amz-date' = $amzDate
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SessionToken)) {
+        $headers['x-amz-security-token'] = $SessionToken
+    }
+
+    $signedHeaders = ($headers.Keys | Sort-Object) -join ';'
+    $canonicalHeaders = (($headers.Keys | Sort-Object | ForEach-Object {
+        "${_}:$($headers[$_].Trim())"
+    }) -join "`n") + "`n"
+
+    $canonicalRequest = @(
+        $Method.ToUpperInvariant()
+        $canonicalPath
+        $canonicalQuery
+        $canonicalHeaders
+        $signedHeaders
+        $payloadHash
+    ) -join "`n"
+
+    $scope = "$dateStamp/$Region/$Service/aws4_request"
+    $stringToSign = @(
+        'AWS4-HMAC-SHA256'
+        $amzDate
+        $scope
+        [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($canonicalRequest)
+        )).ToLowerInvariant()
+    ) -join "`n"
+
+    $key = [Text.Encoding]::UTF8.GetBytes("AWS4$SecretAccessKey")
+    try {
+        foreach ($element in @($dateStamp, $Region, $Service, 'aws4_request', $stringToSign)) {
+            $hmac = [Security.Cryptography.HMACSHA256]::new($key)
+            try {
+                $next = $hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($element))
+            }
+            finally {
+                $hmac.Dispose()
+            }
+            [Array]::Clear($key)
+            $key = $next
+        }
+        $signature = [Convert]::ToHexString($key).ToLowerInvariant()
+    }
+    finally {
+        [Array]::Clear($key)
+    }
+
+    $result = [ordered]@{
+        'X-Amz-Date' = $amzDate
+        'X-Amz-Content-Sha256' = $payloadHash
+        'Authorization' = "AWS4-HMAC-SHA256 Credential=$AccessKeyId/$scope, " +
+            "SignedHeaders=$signedHeaders, Signature=$signature"
+    }
+    if ($headers.Contains('x-amz-security-token')) {
+        $result['X-Amz-Security-Token'] = $SessionToken
+    }
+    return $result
+}
+
+function Get-DtaiAwsCredential {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Authority)
+
+    $accessKeyId = $env:AWS_ACCESS_KEY_ID
+    $secretAccessKey = $env:AWS_SECRET_ACCESS_KEY
+    if ([string]::IsNullOrWhiteSpace($accessKeyId) -or
+        [string]::IsNullOrWhiteSpace($secretAccessKey)) {
+        throw "AWS authority '$($Authority.Name)' requires AWS_ACCESS_KEY_ID and " +
+            'AWS_SECRET_ACCESS_KEY in the environment.'
+    }
+    return [ordered]@{
+        AccessKeyId = $accessKeyId
+        SecretAccessKey = $secretAccessKey
+        SessionToken = $env:AWS_SESSION_TOKEN
+    }
+}
+
+function Invoke-DtaiAuthorityRelease {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Authority,
+        [Parameter(Mandatory)]$Request
+    )
+
+    $body = $Request | ConvertTo-Json -Depth 8 -Compress
+    $headers = @{}
+    if ($Authority.Provider -eq $script:AwsProvider) {
+        $payload = [Text.Encoding]::UTF8.GetBytes($body)
+        $credential = Get-DtaiAwsCredential $Authority
+        $service = [string](Get-DtaiProperty $Authority 'SigningService')
+        if ([string]::IsNullOrWhiteSpace($service)) { $service = 'execute-api' }
+        $headers = Get-DtaiAwsSigV4Headers -Method 'POST' -Uri ([Uri]$Authority.Endpoint) `
+            -Region ([string](Get-DtaiProperty $Authority 'Region')) -Service $service `
+            -AccessKeyId $credential.AccessKeyId -SecretAccessKey $credential.SecretAccessKey `
+            -SessionToken $credential.SessionToken -Payload $payload
+    }
+    return Invoke-RestMethod -Method Post -Uri $Authority.Endpoint -Headers $headers `
+        -ContentType 'application/json' -Body $body -TimeoutSec 30
+}
+
 function Invoke-DtaiKeyRelease {
     [CmdletBinding()]
     param(
@@ -152,8 +347,7 @@ function Invoke-DtaiKeyRelease {
     if ($null -eq $ReleaseClient) {
         $ReleaseClient = {
             param($Authority, $Request)
-            Invoke-RestMethod -Method Post -Uri $Authority.Endpoint -ContentType 'application/json' `
-                -Body ($Request | ConvertTo-Json -Depth 8 -Compress) -TimeoutSec 30
+            Invoke-DtaiAuthorityRelease -Authority $Authority -Request $Request
         }
     }
 
@@ -260,4 +454,5 @@ function Invoke-DtaiKeyRelease {
     }
 }
 
-Export-ModuleMember -Function Assert-DtaiConfiguration, Invoke-DtaiHkdfSha256, Invoke-DtaiKeyRelease
+Export-ModuleMember -Function Assert-DtaiConfiguration, Get-DtaiAwsSigV4Headers, Invoke-DtaiAuthorityRelease,
+    Invoke-DtaiHkdfSha256, Invoke-DtaiKeyRelease

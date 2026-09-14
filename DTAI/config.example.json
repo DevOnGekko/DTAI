@@ -18,10 +18,12 @@
       "KeyId": "https://example.vault.azure.net/keys/dtai-k1/version"
     },
     {
-      "Name": "authority-secondary",
-      "Provider": "secondary-cloud-kms",
-      "Endpoint": "https://secondary-authority.example.net/v1/release",
-      "KeyId": "provider-specific-key-id"
+      "Name": "authority-aws",
+      "Provider": "aws-kms",
+      "Region": "us-east-1",
+      "SigningService": "execute-api",
+      "Endpoint": "https://aws-authority.example.net/v1/release",
+      "KeyId": "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
     }
   ]
 }
