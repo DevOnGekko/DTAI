@@ -74,10 +74,9 @@ trust. AWS authorities are validated and called with AWS-specific operations:
 - `SigningService` is optional and defaults to `execute-api`; set it to the
   service name that fronts the release endpoint.
 
-Requests to an AWS
-authority are signed with AWS Signature Version 4 over the exact release request
-body, so the authority can authorize the caller with IAM and reject tampered or
-replayed request bodies. Credentials are read from the
+Requests to an AWS authority must be signed with AWS Signature Version 4 over
+the exact release request body, so the authority can authorize the caller with
+IAM and reject tampered or replayed request bodies. Credentials come from the
 standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional
 `AWS_SESSION_TOKEN` environment variables, which is what an instance, task, or
 enclave parent role provides. SigV4 only authorizes transport; the contribution
