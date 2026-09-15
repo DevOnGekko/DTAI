@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>DTAI</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\samples\demo\model001.safetensors" Link="model001.safetensors" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\samples\demo\dek-plain.txt" Link="dek-plain.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\samples\demo\K1-public.pem" Link="K1-public.pem" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\samples\demo\K1.pfx" Link="K1.pfx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\samples\demo\K2-public.pem" Link="K2-public.pem" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\samples\demo\K2.pfx" Link="K2.pfx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

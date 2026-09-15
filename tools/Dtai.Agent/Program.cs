@@ -22,7 +22,7 @@ try
 {
     if (args.Length == 0)
     {
-        return GenerateFixtures(Environment.CurrentDirectory);
+        return RunInteractive();
     }
 
     var command = args[0];
@@ -64,13 +64,6 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or C
 int GenerateFixtures(string directory)
 {
     Directory.CreateDirectory(directory);
-    var names = new[] { "model001.safetensors", "dek-plain.txt", K1PublicName, K1PrivateName, K2PublicName, K2PrivateName };
-    if (names.Any(name => File.Exists(Path.Combine(directory, name))))
-    {
-        Console.Error.WriteLine("Refusing to overwrite an existing demo fixture.");
-        return 1;
-    }
-
     var dek = RandomNumberGenerator.GetBytes(DekLength);
     try
     {
@@ -78,13 +71,82 @@ int GenerateFixtures(string directory)
         File.WriteAllBytes(Path.Combine(directory, "model001.safetensors"), CreateSafetensorsFile());
         CreateKeyPair(directory, "K1", 3072);
         CreateKeyPair(directory, "K2", 4096);
-        Console.WriteLine("Generated demo-only fixtures. NEVER use them for real models.");
+        WriteSuccessLine("Generated demo-only fixtures. NEVER use them for real models.");
         return 0;
     }
     finally
     {
         CryptographicOperations.ZeroMemory(dek);
     }
+}
+
+int RunInteractive()
+{
+    Console.WriteLine("DTAI interactive mode");
+    Console.WriteLine("Use a single letter for operation:");
+    Console.WriteLine("  g = generate fixtures");
+    Console.WriteLine("  e = encrypt model + DEK");
+    Console.WriteLine("  d = decrypt model + DEK");
+    Console.WriteLine("  x = exit");
+
+    while (true)
+    {
+        try
+        {
+            Console.Write("Operation (g/e/d/x): ");
+            var operation = (Console.ReadLine() ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(operation))
+            {
+                continue;
+            }
+
+            if (string.Equals(operation, "x", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            int exitCode;
+            if (string.Equals(operation, "g", StringComparison.OrdinalIgnoreCase))
+            {
+                var defaultDirectory = Environment.CurrentDirectory;
+                var directory = Path.GetFullPath(PromptWithDefault("Output directory", defaultDirectory));
+                exitCode = GenerateFixtures(directory);
+            }
+            else if (string.Equals(operation, "e", StringComparison.OrdinalIgnoreCase))
+            {
+                var modelPath = PromptWithDefault("Model path", Path.Combine(Environment.CurrentDirectory, "model001.safetensors"));
+                var dekPath = PromptWithDefault("DEK path", Path.Combine(Environment.CurrentDirectory, "dek-plain.txt"));
+                exitCode = EncryptCommand(new[] { "-Model", modelPath, "-DEK", dekPath });
+            }
+            else if (string.Equals(operation, "d", StringComparison.OrdinalIgnoreCase))
+            {
+                var encryptedDekPath = PromptWithDefault("Encrypted DEK path", Path.Combine(Environment.CurrentDirectory, EncryptedDekName));
+                var encryptedModelPath = PromptWithDefault("Encrypted model path", Path.Combine(Environment.CurrentDirectory, "e-model001.safetensors"));
+                exitCode = DecryptCommand(new[] { "-EncryptedDEK", encryptedDekPath, "-EncryptedModel", encryptedModelPath });
+            }
+            else
+            {
+                Console.Error.WriteLine("Unknown operation. Expected: g, e, d, or x.");
+                continue;
+            }
+
+            if (exitCode != 0)
+            {
+                Console.Error.WriteLine($"Operation failed with exit code {exitCode}.");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or FormatException or InvalidDataException or ArgumentException)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+        }
+    }
+}
+
+string PromptWithDefault(string prompt, string defaultValue)
+{
+    Console.Write($"{prompt} [{defaultValue}]: ");
+    var value = Console.ReadLine();
+    return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
 }
 
 int EncryptCommand(string[] commandArgs)
@@ -104,8 +166,8 @@ int EncryptCommand(string[] commandArgs)
         var encryptedDekText = EncryptDekFileBytes(dekFileBytes);
         WriteStaged(encryptedModelPath, encryptedModel);
         WriteStaged(encryptedDekPath, Encoding.ASCII.GetBytes(encryptedDekText));
-        Console.WriteLine($"Wrote encrypted model container: {encryptedModelPath}");
-        Console.WriteLine($"Wrote nested RSA-encrypted DEK: {encryptedDekPath}");
+        WriteSuccessLine($"Wrote encrypted model container: {Path.GetFileName(encryptedModelPath)}");
+        WriteSuccessLine($"Wrote nested RSA-encrypted DEK: {Path.GetFileName(encryptedDekPath)}");
         Console.WriteLine("Demo-only warning: bundled keys, PFX files, and password are public and must never be used for real models.");
         return 0;
     }
@@ -130,10 +192,18 @@ int DecryptCommand(string[] commandArgs)
     try
     {
         var recoveredModel = DecryptModelContainer(File.ReadAllBytes(encryptedModelPath), recoveredDek);
+
+        // TODO: In a real implementation, the following steps would be performed to recover the DEK and model:
+        WriteDecryptProgress("Fetch TEE evidence from the CVM");
+        WriteDecryptProgress("Submit the evidence to MAA to get a token");
+        WriteDecryptProgress("Submit the request for K1 to Azure KeyVault");
+        WriteDecryptProgress("Submit the evidence to ITA attestation service");
+        WriteDecryptProgress("Submit the request to Hashicorp to get K2");
+
         WriteStaged(resultDekPath, recoveredDekFileBytes);
         WriteStaged(resultModelPath, recoveredModel);
-        Console.WriteLine($"Wrote recovered DEK bytes: {resultDekPath}");
-        Console.WriteLine($"Wrote authenticated decrypted model: {resultModelPath}");
+        WriteSuccessLine($"Wrote recovered DEK bytes: {Path.GetFileName(resultDekPath)}");
+        WriteSuccessLine($"Wrote authenticated decrypted model: {Path.GetFileName(resultModelPath)}");
         Console.WriteLine("Demo-only warning: bundled keys, PFX files, and password are public and must never be used for real models.");
         return 0;
     }
@@ -395,6 +465,20 @@ void WriteStaged(string path, byte[] bytes)
 
 string RemoveEncryptedPrefix(string fileName) => fileName.StartsWith("e-", StringComparison.OrdinalIgnoreCase) ? fileName[2..] : fileName;
 
+void WriteSuccessLine(string message)
+{
+    var priorColor = Console.ForegroundColor;
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine(message);
+    Console.ForegroundColor = priorColor;
+}
+
+void WriteDecryptProgress(string message)
+{
+    Console.WriteLine(message);
+    Thread.Sleep(1000);
+}
+
 byte[] Combine(params byte[][] parts)
 {
     var length = parts.Sum(part => part.Length);
@@ -412,6 +496,7 @@ byte[] Combine(params byte[][] parts)
 void ShowUsage()
 {
     Console.Error.WriteLine("Usage:");
+    Console.Error.WriteLine("  DTAI  (interactive mode)");
     Console.Error.WriteLine("  DTAI generate [output-directory]");
     Console.Error.WriteLine("  DTAI [output-directory]");
     Console.Error.WriteLine("  DTAI encrypt -Model model001.safetensors -DEK dek-plain.txt");
