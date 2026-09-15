@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Dtai.Agent.Attestation;
 
 const string Password = "dtai-demo-only";
 const string K1PublicName = "K1-public.pem";
@@ -193,12 +194,15 @@ int DecryptCommand(string[] commandArgs)
     {
         var recoveredModel = DecryptModelContainer(File.ReadAllBytes(encryptedModelPath), recoveredDek);
 
-        // TODO: In a real implementation, the following steps would be performed to recover the DEK and model:
-        WriteDecryptProgress("Fetch TEE evidence from the CVM");
-        WriteDecryptProgress("Submit the evidence to MAA to get a token");
-        WriteDecryptProgress("Submit the request for K1 to Azure KeyVault");
-        WriteDecryptProgress("Submit the evidence to ITA attestation service");
-        WriteDecryptProgress("Submit the request to Hashicorp to get K2");
+        Console.WriteLine("Demo-only simulation: no attestation or remote key retrieval is performed; decryption uses local PFX files.");
+        var workflow = new AttestationWorkflow(
+            new TeeEvidenceProvider(),
+            new MaaAttestationService(),
+            new KeyVaultKeyProvider(),
+            new ItaAttestationService(),
+            new HashicorpKeyProvider());
+        // Demo key references are placeholders and are not used for local decryption.
+        _ = workflow.Run(WriteDecryptProgress);
 
         WriteStaged(resultDekPath, recoveredDekFileBytes);
         WriteStaged(resultModelPath, recoveredModel);
