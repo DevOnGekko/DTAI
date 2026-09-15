@@ -4,3 +4,16 @@ bin
 obj
 appsettings.json
 local.settings.json
+
+# Local file-demo keys and generated outputs (only the deliberately public fixtures below are tracked).
+*.pfx
+encrypted-dek.txt
+result-dek.txt
+e-*.safetensors
+result-*.safetensors
+!samples/demo/K1.pfx
+!samples/demo/K2.pfx
+!samples/demo/encrypted-dek.txt
+!samples/demo/result-dek.txt
+!samples/demo/e-model001.safetensors
+!samples/demo/result-model001.safetensors

@@ -11,10 +11,29 @@ public static class Program
     private const string Usage = """
         Usage: dtai --configuration <path> --attestation-command <path> \
                     --context <model-context> --input <path> --output <path>
+
+               DTAI encrypt -Model <model> -DEK <dek-file>
+               DTAI decrypt -EncryptedDEK <encrypted-dek> -EncryptedModel <encrypted-model>
         """;
 
     public static async Task<int> Main(string[] args)
     {
+        if (args.Length > 0 && (args[0].Equals("encrypt", StringComparison.OrdinalIgnoreCase) ||
+                                args[0].Equals("decrypt", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                return await LocalDemo.RunAsync(args).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is DtaiException or IOException or
+                                                   UnauthorizedAccessException or FormatException or
+                                                   CryptographicException or ArgumentException)
+            {
+                Console.Error.WriteLine(exception.Message);
+                return 1;
+            }
+        }
+
         string? configurationPath = null;
         string? attestationCommand = null;
         string? context = null;
@@ -69,7 +88,7 @@ public static class Program
                 .ConfigureAwait(false);
             return 0;
         }
-        catch (Exception exception) when (exception is DtaiException or IOException or
+        catch (Exception exception) when (exception is DtaiException or IOException or ArgumentException or
                                               UnauthorizedAccessException or FormatException or
                                               JsonException or CryptographicException or
                                               HttpRequestException or OperationCanceledException)

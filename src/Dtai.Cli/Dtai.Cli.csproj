@@ -8,6 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>Dtai.Cli</RootNamespace>
+    <AssemblyName>DTAI</AssemblyName>
+    <PackageId>Dtai.Cli</PackageId>
   </PropertyGroup>
 
   <ItemGroup>

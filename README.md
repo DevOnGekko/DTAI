@@ -197,3 +197,67 @@ The C# tooling requires the .NET 8.0 SDK or newer.
 dotnet build
 dotnet run --project test/Dtai.Tests
 ```
+
+## Local file demo
+
+This optional local demo is **not** the production DTAI attestation/TEE,
+multi-authority HKDF protocol described above. It exists only to demonstrate
+streaming model encryption and literal nested RSA wrapping of a local DEK.
+
+Build a Windows apphost (cross-publishing does not test it on Windows):
+
+```shell
+dotnet publish src/Dtai.Cli -c Release -r win-x64 --self-contained false
+```
+
+Copy `DTAI.exe` from the publish directory into `samples/demo`, open a shell
+there, and run the two commands exactly as follows:
+
+```shell
+DTAI.exe encrypt -Model model001.safetensors -DEK dek-plain.txt
+DTAI.exe decrypt -EncryptedDEK encrypted-dek.txt -EncryptedModel e-model001.safetensors
+```
+
+On non-Windows hosts, use `dotnet run --project ../../src/Dtai.Cli --` before
+each command, or run `samples/demo/verify-demo.sh`. Successful steps print
+green messages. The encrypt command writes `e-model001.safetensors` and
+`encrypted-dek.txt`; decrypt writes `result-dek.txt` and
+`result-model001.safetensors`. Outputs live beside the supplied model, and are
+never overwritten. The stable AES-GCM context is `dtai://local-file-demo/v1`,
+so moving files does not change authentication.
+
+Expected successful output (shown without terminal color) includes:
+
+```text
+Inputs validated.
+Model encrypted and written to 'e-model001.safetensors'.
+DEK wrapped with K1 public key.
+DEK wrapped with K2 public key and written to 'encrypted-dek.txt'.
+DEK unwrapped with K2 private key.
+DEK unwrapped with K1 private key.
+Recovered DEK saved to 'result-dek.txt'.
+Model decrypted and saved to 'result-model001.safetensors'.
+```
+
+`dek-plain.txt` is Base64 text encoding exactly 32 random bytes; its original
+bytes (including a supported newline or BOM) are RSA-wrapped and recovered
+unchanged. The model is encrypted in authenticated 64 KiB AES-256-GCM chunks.
+K1 is 3072-bit RSA and K2 is 4096-bit RSA, both with RSA-OAEP-SHA256. K2 has
+446 bytes of OAEP capacity, enough for K1's 384-byte ciphertext; incompatible
+keys fail before any output is written. This is direct nested encryption, not
+a hybrid scheme or RSA block splitting (see RFC 8017 §7.1).
+
+The six files under `samples/demo` are actual, deliberately public,
+**demo-only** fixtures. Never use their DEK or PFX private keys for real
+models. Their password is `dtai-demo-only`, optionally overridden by
+`DTAI_K1_PFX_PASSWORD` and `DTAI_K2_PFX_PASSWORD` (never printed). Sharing
+both PFX files is not independent-authority enforcement. Regenerate fresh
+fixtures, without overwriting existing files, with:
+
+```shell
+dotnet run --project tools/Dtai.DemoGenerator -- samples/demo
+```
+
+Remove the four generated outputs named above before rerunning. The verification
+script runs both operations, compares both recovered files byte-for-byte, and
+prints a green comparison success message.
