@@ -21,15 +21,12 @@ The DEK is never stored by either authority and is not written by the module.
 
 ## Components
 
-- `src/Dtai` — C# library with configuration validation, secure release
-  orchestration, AWS Signature Version 4 request signing, envelope validation,
-  RSA-OAEP-256 unwrapping, and HKDF-SHA-256 derivation.
-- `src/Dtai.Cli` — executable that releases a DEK in a TEE and encrypts a file
-  with chunked AES-256-GCM without writing the DEK.
-- `test/Dtai.Tests` — dependency-free focused tests for the C# library.
+- `tools/Dtai.DemoGenerator` — the only code project in this repository and the
+  sole project in `Dtai.sln`. It generates the deliberately public,
+  **demo-only** fixtures under `samples/demo`.
 
-The C# library implements the DTAI protocol and derives the same DEK from the
-same configuration, context, and contributions.
+The architecture below documents the DTAI protocol this repository targets. No
+protocol implementation is currently kept in this repository.
 
 ## Authority requirements
 
@@ -77,10 +74,9 @@ trust. AWS authorities are validated and called with AWS-specific operations:
 - `SigningService` is optional and defaults to `execute-api`; set it to the
   service name that fronts the release endpoint.
 
-These operations live in `AwsSigV4` and `DtaiAwsAuthority`. Requests to an AWS
-authority are signed with AWS Signature Version 4 over the exact release request
-body, so the authority can authorize the caller with IAM and reject tampered or
-replayed request bodies. Credentials are read from the
+Requests to an AWS authority must be signed with AWS Signature Version 4 over
+the exact release request body, so the authority can authorize the caller with
+IAM and reject tampered or replayed request bodies. Credentials come from the
 standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional
 `AWS_SESSION_TOKEN` environment variables, which is what an instance, task, or
 enclave parent role provides. SigV4 only authorizes transport; the contribution
@@ -139,125 +135,39 @@ return the normalized response with the contribution encrypted directly to the
 recipient JWK. Do not return a plaintext Cloud KMS decrypt result to the
 workload.
 
-## Use
+## Build
 
-For in-process use, the C# library is the entry point for .NET workloads. The
-attestation callback receives the exact challenge to place in signed runtime
-data and must return the signed evidence:
-
-```csharp
-using Dtai;
-
-var configuration = DtaiConfiguration.Load("./dtai.json");
-var dek = await DtaiKeyRelease.ReleaseAsync(
-    configuration,
-    "model://publisher/name/v1",
-    async (authority, challenge, cancellationToken) =>
-        await attestationClient.GetEvidenceAsync(authority, challenge, cancellationToken));
-try
-{
-    // Decrypt and load model weights inside the TEE.
-}
-finally
-{
-    CryptographicOperations.ZeroMemory(dek);
-}
-```
-
-For command-line integrations, the attestation executable runs inside the TEE,
-collects its hardware evidence, sends that evidence to Microsoft Azure
-Attestation (MAA), and writes only the resulting signed MAA token to standard
-output. It receives the authority name as its first argument and the challenge
-JSON on standard input; the evidence must bind that challenge. The Azure
-authority adapter presents the MAA token to the Premium Key Vault Secure Key
-Release operation and normalizes the released contribution as described above.
-The C# CLI releases and derives the DEK only in memory, then encrypts the input
-with chunked AES-256-GCM:
+The demo generator requires the .NET 8.0 SDK or newer.
 
 ```shell
-dotnet run --project src/Dtai.Cli -- \
-  --configuration ./dtai.json \
-  --attestation-command /opt/dtai/get-attestation \
-  --context 'model://publisher/name/v1' \
-  --input ./model.bin \
-  --output ./model.bin.dtai
+dotnet build Dtai.sln
 ```
 
-Run the CLI only inside the attested TEE. The output authenticates its header,
-chunk ordering, final marker, and model context. The 32-byte DEK is zeroed after
-encryption and is never written to disk.
-model. The CLI refuses to overwrite a file and creates it with mode `0600` on
-Unix.
+`Dtai.sln` contains `tools/Dtai.DemoGenerator/Dtai.DemoGenerator.csproj` as its
+only project.
 
-## Test
+## Demo fixture generator
 
-The C# tooling requires the .NET 8.0 SDK or newer.
-
-```shell
-dotnet build
-dotnet run --project test/Dtai.Tests
-```
-
-## Local file demo
-
-This optional local demo is **not** the production DTAI attestation/TEE,
-multi-authority HKDF protocol described above. It exists only to demonstrate
-streaming model encryption and literal nested RSA wrapping of a local DEK.
-
-Build a Windows apphost (cross-publishing does not test it on Windows):
-
-```shell
-dotnet publish src/Dtai.Cli -c Release -r win-x64 --self-contained false
-```
-
-Copy `DTAI.exe` from the publish directory into `samples/demo`, open a shell
-there, and run the two commands exactly as follows:
-
-```shell
-DTAI.exe encrypt -Model model001.safetensors -DEK dek-plain.txt
-DTAI.exe decrypt -EncryptedDEK encrypted-dek.txt -EncryptedModel e-model001.safetensors
-```
-
-On non-Windows hosts, use `dotnet run --project ../../src/Dtai.Cli --` before
-each command, or run `samples/demo/verify-demo.sh`. Successful steps print
-green messages. The encrypt command writes `e-model001.safetensors` and
-`encrypted-dek.txt`; decrypt writes `result-dek.txt` and
-`result-model001.safetensors`. Outputs live beside the supplied model, and are
-never overwritten. The stable AES-GCM context is `dtai://local-file-demo/v1`,
-so moving files does not change authentication.
-
-Expected successful output (shown without terminal color) includes:
-
-```text
-Inputs validated.
-Model encrypted and written to 'e-model001.safetensors'.
-DEK wrapped with K1 public key.
-DEK wrapped with K2 public key and written to 'encrypted-dek.txt'.
-DEK unwrapped with K2 private key.
-DEK unwrapped with K1 private key.
-Recovered DEK saved to 'result-dek.txt'.
-Model decrypted and saved to 'result-model001.safetensors'.
-```
-
-`dek-plain.txt` is Base64 text encoding exactly 32 random bytes; its original
-bytes (including a supported newline or BOM) are RSA-wrapped and recovered
-unchanged. The model is encrypted in authenticated 64 KiB AES-256-GCM chunks.
-K1 is 3072-bit RSA and K2 is 4096-bit RSA, both with RSA-OAEP-SHA256. K2 has
-446 bytes of OAEP capacity, enough for K1's 384-byte ciphertext; incompatible
-keys fail before any output is written. This is direct nested encryption, not
-a hybrid scheme or RSA block splitting (see RFC 8017 §7.1).
-
-The six files under `samples/demo` are actual, deliberately public,
-**demo-only** fixtures. Never use their DEK or PFX private keys for real
-models. Their password is `dtai-demo-only`, optionally overridden by
-`DTAI_K1_PFX_PASSWORD` and `DTAI_K2_PFX_PASSWORD` (never printed). Sharing
-both PFX files is not independent-authority enforcement. Regenerate fresh
-fixtures, without overwriting existing files, with:
+`tools/Dtai.DemoGenerator` writes six local fixtures: `model001.safetensors`,
+`dek-plain.txt`, `K1-public.pem`, `K1.pfx`, `K2-public.pem`, and `K2.pfx`. It
+takes an optional output directory and uses the current directory when no
+argument is given:
 
 ```shell
 dotnet run --project tools/Dtai.DemoGenerator -- samples/demo
 ```
 
-Remove the four generated outputs named above before rerunning. The verification
-script runs both operations, compares both recovered files byte-for-byte, and
-prints a green comparison success message.
+The generator creates the output directory if needed and refuses to overwrite
+any existing fixture, so delete the previous files first when regenerating. It
+exits with `1` when a fixture already exists and `2` when more than one
+argument is supplied.
+
+`model001.safetensors` is a format-valid toy F32 `[1]` tensor. `dek-plain.txt`
+is Base64 text encoding exactly 32 random bytes. K1 is 3072-bit RSA and K2 is
+4096-bit RSA; both PFX files use the password `dtai-demo-only`.
+
+The generated files, including the ones tracked under `samples/demo`, are
+deliberately public **demo-only** fixtures. Never use their DEK or PFX private
+keys for real models. Sharing both PFX files is not independent-authority
+enforcement, and this local demo material is **not** the production DTAI
+attestation/TEE multi-authority HKDF protocol described above.
