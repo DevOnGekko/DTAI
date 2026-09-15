@@ -146,28 +146,70 @@ dotnet build Dtai.sln
 `Dtai.sln` contains `tools/Dtai.DemoGenerator/Dtai.DemoGenerator.csproj` as its
 only project.
 
-## Demo fixture generator
+## Demo tool
 
-`tools/Dtai.DemoGenerator` writes six local fixtures: `model001.safetensors`,
-`dek-plain.txt`, `K1-public.pem`, `K1.pfx`, `K2-public.pem`, and `K2.pfx`. It
-takes an optional output directory and uses the current directory when no
-argument is given:
+`tools/Dtai.DemoGenerator` builds as an executable assembly named `DTAI` while
+retaining the project directory name. On Windows, normal build/publish apphost
+output uses `DTAI.exe`.
+
+### Fixture generation
+
+The tool writes six local fixtures: `model001.safetensors`, `dek-plain.txt`,
+`K1-public.pem`, `K1.pfx`, `K2-public.pem`, and `K2.pfx`. It preserves the
+original invocation shape: no argument writes to the current directory, and one
+non-command argument writes to that output directory. The explicit command is
+also supported:
 
 ```shell
-dotnet run --project tools/Dtai.DemoGenerator -- samples/demo
+dotnet run --project tools/Dtai.DemoGenerator -- generate samples/demo
 ```
 
 The generator creates the output directory if needed and refuses to overwrite
-any existing fixture, so delete the previous files first when regenerating. It
-exits with `1` when a fixture already exists and `2` when more than one
-argument is supplied.
+any existing fixture, so delete the previous files first when regenerating.
 
 `model001.safetensors` is a format-valid toy F32 `[1]` tensor. `dek-plain.txt`
 is Base64 text encoding exactly 32 random bytes. K1 is 3072-bit RSA and K2 is
 4096-bit RSA; both PFX files use the password `dtai-demo-only`.
 
+### Local encryption/decryption demo
+
+Run the demo from `samples/demo`, where the default `K1`/`K2` public PEM and PFX
+files are resolved from the current working directory:
+
+```shell
+DTAI.exe encrypt -Model model001.safetensors -DEK dek-plain.txt
+DTAI.exe decrypt -EncryptedDEK encrypted-dek.txt -EncryptedModel e-model001.safetensors
+```
+
+`encrypt` validates that the DEK file is Base64 text for exactly 32 bytes, then
+AES-256-GCM encrypts the model with a fresh 12-byte nonce and 16-byte tag. The
+output model path is the input model file name prefixed with `e-` in the same
+directory; for example, `model001.safetensors` becomes
+`e-model001.safetensors`. This file is a DTAI demo encrypted container, not a
+loadable safetensors file. Its binary format is: 8-byte magic `DTAIEMOD`,
+1-byte version `1`, 1-byte algorithm `1` for AES-256-GCM, 1-byte nonce length,
+1-byte tag length, 8-byte little-endian ciphertext length, then nonce, tag, and
+ciphertext. The fixed header is authenticated as AES-GCM additional data.
+Malformed, unsupported, truncated, or unauthenticated containers are rejected.
+
+`encrypt` also encrypts the original DEK file bytes with `K1-public.pem` using
+RSA-OAEP-SHA256, encrypts those raw RSA ciphertext bytes again with
+`K2-public.pem` using RSA-OAEP-SHA256, and writes the final Base64 ciphertext to
+`encrypted-dek.txt` in the current directory. The inner RSA ciphertext is not
+Base64 encoded before the outer RSA encryption. The bundled K1 can encrypt up to
+318 bytes with OAEP-SHA256, and the bundled K2 can encrypt the 384-byte raw K1
+ciphertext because its limit is 446 bytes; larger or incompatible keys fail
+clearly instead of changing padding or splitting ciphertext.
+
+`decrypt` reads only `encrypted-dek.txt`, `e-model001.safetensors`, `K2.pfx`,
+and `K1.pfx` from the provided/current paths. It writes `result-dek.txt` in the
+current directory and writes the authenticated decrypted model as the encrypted
+model file name with leading `e-` removed and `result-` prefixed, for example
+`result-model001.safetensors`. Authentication is completed before plaintext
+outputs are written.
+
 The generated files, including the ones tracked under `samples/demo`, are
-deliberately public **demo-only** fixtures. Never use their DEK or PFX private
-keys for real models. Sharing both PFX files is not independent-authority
-enforcement, and this local demo material is **not** the production DTAI
-attestation/TEE multi-authority HKDF protocol described above.
+deliberately public **demo-only** fixtures. Never use their DEK, PFX private
+keys, or shared password for real models. Sharing both PFX files is not
+independent-authority enforcement, and this local demo material is **not** the
+production DTAI attestation/TEE multi-authority HKDF protocol described above.
