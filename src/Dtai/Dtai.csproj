@@ -7,7 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>Dtai</RootNamespace>
-    <AssemblyName>Dtai</AssemblyName>
+    <AssemblyName>Dtai.Core</AssemblyName>
+    <PackageId>Dtai</PackageId>
   </PropertyGroup>
 
 </Project>

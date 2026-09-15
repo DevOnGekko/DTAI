@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Dtai;
+using Dtai.Cli;
 
 namespace Dtai.Tests;
 
@@ -14,6 +15,7 @@ public static class Program
 
         AssertHkdfMatchesRfc5869();
         await AssertFileEncryptionAsync().ConfigureAwait(false);
+        await AssertLocalFileDemoAsync().ConfigureAwait(false);
         await AssertDerivationIsDeterministicAndBoundAsync().ConfigureAwait(false);
         AssertConfigurationRules();
         AssertAzureConfigurationRules();
@@ -40,6 +42,77 @@ public static class Program
 
     private const string AwsKeyArn =
         "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555";
+
+    private static async Task AssertLocalFileDemoAsync()
+    {
+        var originalDirectory = Environment.CurrentDirectory;
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"dtai-demo-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            var fixtureDirectory = FindFixtureDirectory();
+            foreach (var name in new[] { "model001.safetensors", "dek-plain.txt", "K1-public.pem", "K1.pfx", "K2-public.pem", "K2.pfx" })
+            {
+                File.Copy(Path.Combine(fixtureDirectory, name), Path.Combine(temporaryDirectory, name));
+            }
+            var expectedDek = File.ReadAllBytes(Path.Combine(temporaryDirectory, "dek-plain.txt"))
+                .Concat(Encoding.UTF8.GetBytes("\r\n"))
+                .ToArray();
+            File.WriteAllBytes(Path.Combine(temporaryDirectory, "dek-plain.txt"), expectedDek);
+
+            Environment.CurrentDirectory = temporaryDirectory;
+            await LocalDemo.RunAsync(new[] { "encrypt", "-Model", "model001.safetensors", "-DEK", "dek-plain.txt" })
+                .ConfigureAwait(false);
+            File.Delete(Path.Combine(temporaryDirectory, "model001.safetensors"));
+            File.Delete(Path.Combine(temporaryDirectory, "dek-plain.txt"));
+            File.Delete(Path.Combine(temporaryDirectory, "K1-public.pem"));
+            File.Delete(Path.Combine(temporaryDirectory, "K2-public.pem"));
+            await LocalDemo.RunAsync(new[] { "decrypt", "-EncryptedDEK", "encrypted-dek.txt", "-EncryptedModel", "e-model001.safetensors" })
+                .ConfigureAwait(false);
+
+            if (!File.ReadAllBytes(Path.Combine(temporaryDirectory, "result-dek.txt")).SequenceEqual(
+                    expectedDek) ||
+                !File.ReadAllBytes(Path.Combine(temporaryDirectory, "result-model001.safetensors")).SequenceEqual(
+                    File.ReadAllBytes(Path.Combine(fixtureDirectory, "model001.safetensors"))))
+            {
+                throw new InvalidOperationException("Local demo did not recover its inputs byte-for-byte.");
+            }
+
+            await AssertThrowsAsync(
+                () => LocalDemo.RunAsync(new[] { "decrypt", "-EncryptedDEK", "encrypted-dek.txt", "-EncryptedModel", "e-model001.safetensors" }),
+                "Refusing to overwrite").ConfigureAwait(false);
+            File.Delete(Path.Combine(temporaryDirectory, "result-dek.txt"));
+            File.Delete(Path.Combine(temporaryDirectory, "result-model001.safetensors"));
+            File.Copy(Path.Combine(temporaryDirectory, "K2.pfx"), Path.Combine(temporaryDirectory, "K1.pfx"), overwrite: true);
+            await AssertThrowsAsync(
+                () => LocalDemo.RunAsync(new[] { "decrypt", "-EncryptedDEK", "encrypted-dek.txt", "-EncryptedModel", "e-model001.safetensors" }),
+                "expected K1 ciphertext").ConfigureAwait(false);
+            if (File.Exists(Path.Combine(temporaryDirectory, "result-dek.txt")) ||
+                File.Exists(Path.Combine(temporaryDirectory, "result-model001.safetensors")))
+            {
+                throw new InvalidOperationException("Failed local demo decryption published output.");
+            }
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    private static string FindFixtureDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, "samples", "demo", "model001.safetensors");
+            if (File.Exists(candidate))
+            {
+                return Path.GetDirectoryName(candidate)!;
+            }
+        }
+
+        throw new InvalidOperationException("Unable to locate local demo fixtures.");
+    }
 
     private static DtaiConfiguration NewAwsTestConfiguration(
         string region = "us-east-1",
