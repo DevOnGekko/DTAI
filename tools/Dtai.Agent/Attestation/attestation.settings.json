@@ -1,0 +1,10 @@
+{
+  "MaaEndpoint": "sharedwus.wus.attest.azure.net",
+  "AttestationType": "TdxVm",
+  "AttestationApiVersion": "",
+  "KeyVaultName": "",
+  "KeyName": "",
+  "KeyVersion": "",
+  "KeyVaultApiVersion": "7.4",
+  "TenantId": ""
+}
