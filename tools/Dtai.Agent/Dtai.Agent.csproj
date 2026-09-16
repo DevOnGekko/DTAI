@@ -23,7 +23,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Attestation\attestation.settings.json" Link="attestation.settings.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Attestation\attestation.settings.local.json" Condition="Exists('Attestation\attestation.settings.local.json')" Link="attestation.settings.local.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Attestation\Evidence\**\*" Link="Evidence\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

@@ -89,18 +89,9 @@ public sealed class AttestationTypeDispatchTests
         Assert.Throws<NotSupportedException>(() => service.Attest(new TeeEvidence("{}")));
     }
 
-    [Theory]
-    [InlineData(AttestationTypes.SevSnpVm, "2022-08-01")]
-    [InlineData(AttestationTypes.TdxVm, "2025-06-01")]
-    public void ApiVersionFor_DefaultsPerType(string attestationType, string expected)
-    {
-        Assert.Equal(expected, new AttestationSettings().ApiVersionFor(attestationType));
-    }
-
     [Fact]
-    public void ApiVersionFor_HonorsExplicitOverride()
+    public void AttestationApiVersion_DefaultsTo_2025_06_01()
     {
-        var settings = new AttestationSettings { AttestationApiVersion = "2099-01-01" };
-        Assert.Equal("2099-01-01", settings.ApiVersionFor(AttestationTypes.TdxVm));
+        Assert.Equal("2025-06-01", new AttestationSettings().AttestationApiVersion);
     }
 }

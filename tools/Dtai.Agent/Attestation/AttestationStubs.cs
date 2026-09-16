@@ -74,7 +74,7 @@ public sealed class MaaAttestationService : IMaaAttestationService
         var request = BuildMaaRequest(settings.AttestationType, packed.RootElement);
 
         var url = $"https://{settings.MaaEndpoint}/attest/{settings.AttestationType}" +
-            $"?api-version={settings.ApiVersionFor(settings.AttestationType)}";
+            $"?api-version={settings.AttestationApiVersion}";
         Console.WriteLine($"  [maa] attesting {settings.AttestationType} at {url}");
         using var content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
         using var response = Http.PostAsync(url, content).GetAwaiter().GetResult();

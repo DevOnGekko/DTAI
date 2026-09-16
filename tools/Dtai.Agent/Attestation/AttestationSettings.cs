@@ -23,19 +23,7 @@ public sealed class AttestationSettings
 
     public string TenantId { get; set; } = string.Empty;
 
-    // Blank means "use the per-type default" (see ApiVersionFor).
-    public string AttestationApiVersion { get; set; } = string.Empty;
-
-    // MAA introduced TDX attestation in a later API version than SEV-SNP, so the
-    // version follows the type unless explicitly overridden.
-    public string ApiVersionFor(string attestationType) =>
-        !string.IsNullOrWhiteSpace(AttestationApiVersion)
-            ? AttestationApiVersion
-            : attestationType switch
-            {
-                AttestationTypes.TdxVm => "2025-06-01",
-                _ => "2022-08-01",
-            };
+    public string AttestationApiVersion { get; set; } = "2025-06-01";
 
     // Real MAA/Key Vault calls run only when a vault and key are configured.
     public bool Enabled =>
@@ -45,14 +33,10 @@ public sealed class AttestationSettings
     {
         var settings = new AttestationSettings();
 
-        foreach (var file in new[] { "attestation.settings.json", "attestation.settings.local.json" })
+        // Optional local override (git-ignored); base defaults live in this class.
+        var path = Path.Combine(AppContext.BaseDirectory, "attestation.settings.local.json");
+        if (File.Exists(path))
         {
-            var path = Path.Combine(AppContext.BaseDirectory, file);
-            if (!File.Exists(path))
-            {
-                continue;
-            }
-
             var loaded = JsonSerializer.Deserialize<AttestationSettings>(
                 File.ReadAllText(path),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
