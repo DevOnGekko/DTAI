@@ -5,6 +5,9 @@ obj
 appsettings.json
 local.settings.json
 
+# Local attestation config override (may contain vault/tenant names) — test only
+attestation.settings.local.json
+
 # Local file-demo keys and generated outputs (only the deliberately public fixtures below are tracked).
 *.pfx
 encrypted-dek.txt
@@ -17,3 +20,6 @@ result-*.safetensors
 !samples/demo/result-dek.txt
 !samples/demo/e-model001.safetensors
 !samples/demo/result-model001.safetensors
+
+tools/Dtai.Agent/Attestation/Evidence/*
+

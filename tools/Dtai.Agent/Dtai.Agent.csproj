@@ -16,4 +16,14 @@
     <None Include="..\..\samples\demo\K2-public.pem" Link="K2-public.pem" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\samples\demo\K2.pfx" Link="K2.pfx" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.13.1" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Attestation\attestation.settings.local.json" Condition="Exists('Attestation\attestation.settings.local.json')" Link="attestation.settings.local.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Attestation\Evidence\**\*" Link="Evidence\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

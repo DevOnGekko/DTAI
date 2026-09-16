@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -7,33 +7,28 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dtai.Agent", "tools\\Dtai.Agent\\Dtai.Agent.csproj", "{F3D61130-B4BF-4174-AF76-701B8A79E82C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dtai.Agent.Tests", "tools\Dtai.Agent.Tests\Dtai.Agent.Tests.csproj", "{F187190F-E0D3-47F7-8077-59140963C93A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
-		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
-		Release|x64 = Release|x64
-		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x64.Build.0 = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x86.Build.0 = Debug|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x64.ActiveCfg = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x64.Build.0 = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x86.ActiveCfg = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x86.Build.0 = Release|Any CPU
+		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{F187190F-E0D3-47F7-8077-59140963C93A} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

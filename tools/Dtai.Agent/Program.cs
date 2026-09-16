@@ -194,15 +194,27 @@ int DecryptCommand(string[] commandArgs)
     {
         var recoveredModel = DecryptModelContainer(File.ReadAllBytes(encryptedModelPath), recoveredDek);
 
-        Console.WriteLine("Demo-only simulation: no attestation or remote key retrieval is performed; decryption uses local PFX files.");
+        var attestation = Dtai.Agent.Attestation.AttestationSettings.Load();
+        Console.WriteLine(attestation.Enabled
+            ? $"Test mode: performing real {attestation.AttestationType} attestation and Key Vault release; local PFX files still do the decryption."
+            : "Demo-only simulation: no attestation or remote key retrieval is performed; decryption uses local PFX files.");
         var workflow = new AttestationWorkflow(
-            new TeeEvidenceProvider(),
-            new MaaAttestationService(),
-            new KeyVaultKeyProvider(),
+            new TeeEvidenceProvider(attestation),
+            new MaaAttestationService(attestation),
+            new KeyVaultKeyProvider(attestation),
             new ItaAttestationService(),
             new HashicorpKeyProvider());
         // Demo key references are placeholders and are not used for local decryption.
-        _ = workflow.Run(WriteDecryptProgress);
+        // The attestation leg is illustrative here; a failure (e.g. TDX needing a
+        // collateral-provisioned provider) warns but does not block decryption.
+        try
+        {
+            _ = workflow.Run(WriteDecryptProgress);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"Warning: attestation/release step failed: {ex.Message}");
+        }
 
         WriteStaged(resultDekPath, recoveredDekFileBytes);
         WriteStaged(resultModelPath, recoveredModel);
