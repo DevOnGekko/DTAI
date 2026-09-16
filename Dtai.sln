@@ -12,37 +12,17 @@ EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
-		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
-		Release|x64 = Release|x64
-		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x64.Build.0 = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Debug|x86.Build.0 = Debug|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x64.ActiveCfg = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x64.Build.0 = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x86.ActiveCfg = Release|Any CPU
-		{F3D61130-B4BF-4174-AF76-701B8A79E82C}.Release|x86.Build.0 = Release|Any CPU
 		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|x64.Build.0 = Debug|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Debug|x86.Build.0 = Debug|Any CPU
 		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|x64.ActiveCfg = Release|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|x64.Build.0 = Release|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|x86.ActiveCfg = Release|Any CPU
-		{F187190F-E0D3-47F7-8077-59140963C93A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

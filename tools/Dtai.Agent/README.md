@@ -55,14 +55,35 @@ The MAA token is verified locally (signature via MAA's `/certs` JWKS, issuer,
 lifetime); Key Vault re-verifies it and releases only when the token's claims
 satisfy the key's release policy.
 
-## TDX note
+## Run — TDX
 
-`AttestationType` defaults to `TdxVm`. A TDX quote relies on Intel PCS collateral
-MAA fetches out-of-band and that must be current, so the public TDX sample is
-rejected live with `InvalidQuote` (the decrypt logs a warning and continues). The
-request shaping and verification are identical to SEV-SNP — a fresh quote from a
-real TDX CVM (or a provider with staged collateral) is required. Use `SevSnpVm`
-for the self-contained end-to-end path.
+TDX is the default `AttestationType`, so no type override is needed. Same steps
+as SEV-SNP, with the TDX Evidence files (`tdx-quote.b64url`,
+`tdx-runtime-data.b64url`) in `Attestation/Evidence/` and a Key Vault key whose
+release policy allows `x-ms-attestation-type == tdxvm`:
+
+```json
+{ "KeyVaultName": "<your-premium-vault>", "KeyName": "<your-exportable-key>" }
+```
+```powershell
+cd tools/Dtai.Agent
+dotnet run -- generate .
+dotnet run -- encrypt -Model model001.safetensors -DEK dek-plain.txt
+dotnet run -- decrypt -EncryptedDEK encrypted-dek.txt -EncryptedModel e-model001.safetensors
+```
+
+Expected attestation output against the shared endpoint:
+```
+  [maa] attesting TdxVm at https://sharedwus.wus.attest.azure.net/attest/TdxVm?api-version=2025-06-01
+Warning: attestation/release step failed: MAA attestation failed (400): ... InvalidQuote ...
+```
+
+A TDX quote relies on Intel PCS collateral MAA fetches out-of-band and that must
+be current, so the public TDX sample is rejected live with `InvalidQuote` (the
+decrypt logs a warning and still completes). The request shaping and token
+verification are identical to SEV-SNP — a **fresh quote from a real TDX CVM**, or
+a provider with the matching collateral staged, is required to obtain a token.
+For a self-contained end-to-end release, use `SevSnpVm` (above).
 
 ## Tests
 
